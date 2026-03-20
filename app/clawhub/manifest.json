@@ -1,0 +1,76 @@
+{
+  "name": "resonantgenesis",
+  "display_name": "ResonantGenesis (Cloud)",
+  "description": "⚠️ Cloud-based AI agent platform. Triggers agents via webhooks. Data processed on remote servers. Agent identity stored on Ethereum mainnet.",
+  "privacy_level": "cloud",
+  "requires_internet": true,
+  "version": "1.0.0",
+  "author": "ResonantGenesis",
+  "homepage": "https://resonantgenesis.xyz",
+  "repository": "https://github.com/louienemesh/genesis2026_frontend_production_2",
+  "license": "Proprietary",
+  "tags": [
+    "ai-agents",
+    "ethereum",
+    "blockchain",
+    "automation",
+    "webhooks",
+    "decentralized-identity"
+  ],
+  "config_schema": {
+    "webhook_url": {
+      "type": "url",
+      "required": true,
+      "description": "Your ResonantGenesis webhook URL (get from dashboard or /connect-profiles)"
+    },
+    "webhook_secret": {
+      "type": "secret",
+      "required": true,
+      "description": "HMAC-SHA256 secret for signature verification"
+    },
+    "timeout": {
+      "type": "number",
+      "required": false,
+      "default": 30,
+      "description": "Request timeout in seconds"
+    }
+  },
+  "actions": [
+    {
+      "name": "trigger_agent",
+      "description": "Trigger a ResonantGenesis agent workflow via signed webhook",
+      "method": "POST",
+      "signature_header": "X-Webhook-Signature",
+      "signature_method": "hmac-sha256",
+      "parameters": {
+        "event": {
+          "type": "string",
+          "required": true,
+          "description": "Event type (e.g., 'telegram_message', 'deploy_request', 'scheduled_task')"
+        },
+        "data": {
+          "type": "object",
+          "required": false,
+          "description": "Event payload data"
+        }
+      }
+    }
+  ],
+  "transparency": {
+    "what_is_cloud": [
+      "Code execution (LLM calls, API orchestration)",
+      "Webhook event processing",
+      "Agent session management"
+    ],
+    "what_is_decentralized": [
+      "Agent identity (Ethereum mainnet)",
+      "Action audit trail (on-chain)",
+      "Ownership (transferable NFT)"
+    ],
+    "what_stays_local": [
+      "Your OpenClaw configuration",
+      "Your Telegram/Discord credentials",
+      "Your automation trigger rules"
+    ]
+  }
+}
