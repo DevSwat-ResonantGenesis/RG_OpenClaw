@@ -107,6 +107,7 @@ async def _agent_engine_request(
     user_id: str,
     json_body: dict = None,
     timeout: float = 10.0,
+    extra_headers: dict = None,
 ) -> dict:
     """Make authenticated request to agent_engine_service."""
     url = f"{settings.AGENT_ENGINE_URL}/{path.lstrip('/')}"
@@ -116,6 +117,8 @@ async def _agent_engine_request(
     }
     if settings.INTERNAL_SERVICE_KEY:
         headers["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+    if extra_headers:
+        headers.update(extra_headers)
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         if method == "GET":
@@ -636,7 +639,11 @@ async def register_openclaw_agent(body: OpenClawAgentRegister, request: Request)
         "agent_public_hash": agent_crypto_hash,
     }
 
-    agent_result = await _agent_engine_request("POST", "agents/", user_id, json_body=agent_data)
+    # Check for superuser in request headers
+    is_superuser = (request.headers.get("x-is-superuser") or "").strip().lower() in {"1", "true", "yes", "on"}
+    extra_headers = {"x-is-superuser": "true"} if is_superuser else {}
+
+    agent_result = await _agent_engine_request("POST", "agents/", user_id, json_body=agent_data, extra_headers=extra_headers)
     agent_id = agent_result.get("id", "")
     logger.info(f"OpenClaw agent registered: user={user_id} agent={agent_id} name={body.name} hash={agent_crypto_hash[:16]}...")
 
