@@ -491,8 +491,12 @@ async def relay_openclaw_event(
     }
 
     # Forward to agent_engine_service webhook trigger
+    # Use internal service header to bypass signature verification (we're an internal relay)
     target_url = f"{settings.AGENT_ENGINE_URL}/webhooks/agent/{agent_id}/trigger"
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "x-internal-service": "openclaw_service",
+    }
     if x_webhook_signature:
         headers["X-Webhook-Signature"] = x_webhook_signature
 
