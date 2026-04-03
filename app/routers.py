@@ -468,6 +468,7 @@ async def relay_openclaw_event(
     body: WebhookRelayPayload,
     request: Request,
     x_webhook_signature: Optional[str] = Header(None),
+    x_internal_service_key: Optional[str] = Header(None),
 ):
     """
     Public endpoint: relay an OpenClaw event to an agent's webhook trigger.
@@ -475,8 +476,9 @@ async def relay_openclaw_event(
     This is an alternative to calling the agent webhook directly.
     It adds OpenClaw-specific metadata and logging.
     
-    No authentication required — HMAC signature verification happens at the
-    agent_engine_service webhook endpoint.
+    Requires either:
+    - Valid X-Internal-Service-Key (for internal services)
+    - Valid X-Webhook-Signature (for external callers)
     """
     if not settings.ENABLED:
         raise HTTPException(status_code=503, detail="OpenClaw service is currently disabled")
@@ -491,11 +493,11 @@ async def relay_openclaw_event(
     }
 
     # Forward to agent_engine_service webhook trigger
-    # Use internal service header to bypass signature verification (we're an internal relay)
+    # Authenticate as internal service using INTERNAL_SERVICE_KEY
     target_url = f"{settings.AGENT_ENGINE_URL}/webhooks/agent/{agent_id}/trigger"
     headers = {
         "Content-Type": "application/json",
-        "x-internal-service": "openclaw_service",
+        "X-Internal-Service-Key": settings.INTERNAL_SERVICE_KEY,
     }
     if x_webhook_signature:
         headers["X-Webhook-Signature"] = x_webhook_signature
