@@ -63,7 +63,6 @@ class Settings(BaseSettings):
     HEARTBEAT_TIMEOUT_SECONDS: int = 120  # Agent offline if no heartbeat in 2 min
 
     class Config:
-        env_prefix = "OPENCLAW_"
         case_sensitive = False
 
 
