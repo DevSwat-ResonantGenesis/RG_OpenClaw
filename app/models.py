@@ -159,6 +159,9 @@ class OpenClawAgentResponse(BaseModel):
     agent_source: str = "openclaw"
     dsid: Optional[str] = None
     agent_public_hash: Optional[str] = None
+    agent_crypto_hash: Optional[str] = None
+    agent_semantic_hash: Optional[str] = None
+    agent_universe_id: Optional[str] = None
     webhook_url: str = ""
     webhook_secret: str = ""
     memory_mode: str = "cloud"

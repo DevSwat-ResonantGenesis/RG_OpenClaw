@@ -34,6 +34,15 @@ class Settings(BaseSettings):
         "MARKETPLACE_SERVICE_URL", "http://marketplace_service:8000"
     )
 
+    # OpenClaw Gateway (pi-agent-core runtime)
+    OPENCLAW_GATEWAY_URL: str = os.getenv(
+        "OPENCLAW_GATEWAY_URL", "ws://openclaw_gateway:18789"
+    )
+    OPENCLAW_GATEWAY_HTTP_URL: str = os.getenv(
+        "OPENCLAW_GATEWAY_HTTP_URL", "http://openclaw_gateway:18789"
+    )
+    OPENCLAW_GATEWAY_TOKEN: str = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
+
     # Public platform domain (used to build webhook URLs)
     PLATFORM_DOMAIN: str = os.getenv("PLATFORM_DOMAIN", "resonantgenesis.xyz")
 

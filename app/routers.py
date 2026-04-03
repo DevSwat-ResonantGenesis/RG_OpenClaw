@@ -153,6 +153,15 @@ async def health_check():
     except Exception:
         pass
 
+    # Check OpenClaw Gateway health
+    gateway_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.OPENCLAW_GATEWAY_HTTP_URL}/healthz")
+            gateway_ok = resp.status_code == 200
+    except Exception:
+        pass
+
     return ServiceHealth(
         service="openclaw_service",
         version=settings.SERVICE_VERSION,
@@ -551,6 +560,66 @@ async def register_openclaw_agent(body: OpenClawAgentRegister, request: Request)
         "connection_status": "registered",
     }
 
+    # 0. Generate Hash Sphere identity for this agent
+    #    Same 4-layer identity as users: UUID + crypto_hash + user_hash + universe_id
+    agent_identity_seed = f"openclaw:{user_id}:{body.name}:{datetime.now(timezone.utc).isoformat()}"
+    agent_crypto_hash = hashlib.sha256(agent_identity_seed.encode("utf-8")).hexdigest()
+    agent_semantic_hash = hashlib.sha256(
+        f"hash_sphere:{agent_crypto_hash}:{body.name}".encode("utf-8")
+    ).hexdigest()
+    agent_universe_id = hashlib.sha256(
+        f"universe:{agent_crypto_hash}".encode("utf-8")
+    ).hexdigest()[:32]
+
+    openclaw_config["agent_crypto_hash"] = agent_crypto_hash
+    openclaw_config["agent_semantic_hash"] = agent_semantic_hash
+    openclaw_config["agent_universe_id"] = agent_universe_id
+
+    # Anchor identity on blockchain
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"{settings.BLOCKCHAIN_SERVICE_URL}/identity/register",
+                json={
+                    "user_id": f"agent:{body.name}",
+                    "crypto_hash": agent_crypto_hash,
+                    "user_hash": agent_semantic_hash,
+                    "universe_id": agent_universe_id,
+                    "identity_type": "agent",
+                    "source": "openclaw",
+                },
+                headers={"X-Internal-Key": settings.INTERNAL_SERVICE_KEY},
+            )
+        logger.info(f"Agent identity anchored on blockchain: hash={agent_crypto_hash[:16]}...")
+    except Exception as e:
+        logger.warning(f"Blockchain identity anchoring failed: {e}")
+
+    # Store identity in Hash Sphere memory
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"{settings.MEMORY_SERVICE_URL}/memories/ingest",
+                json={
+                    "content": f"Agent {body.name} registered with crypto_hash={agent_crypto_hash}, semantic_hash={agent_semantic_hash}, universe_id={agent_universe_id}, source=openclaw",
+                    "memory_type": "semantic",
+                    "metadata": {
+                        "type": "agent_identity",
+                        "agent_name": body.name,
+                        "crypto_hash": agent_crypto_hash,
+                        "semantic_hash": agent_semantic_hash,
+                        "universe_id": agent_universe_id,
+                        "source": "openclaw",
+                    },
+                    "tags": ["agent_identity", "openclaw", "hash_sphere"],
+                },
+                headers={
+                    "x-user-id": user_id,
+                    "x-internal-service-key": settings.INTERNAL_SERVICE_KEY,
+                },
+            )
+    except Exception as e:
+        logger.warning(f"Hash Sphere identity store failed: {e}")
+
     # 1. Create agent on agent_engine_service with source=openclaw
     agent_data = {
         "name": body.name,
@@ -564,11 +633,12 @@ async def register_openclaw_agent(body: OpenClawAgentRegister, request: Request)
         "mode": body.mode,
         "agent_source": "openclaw",
         "openclaw_config": openclaw_config,
+        "agent_public_hash": agent_crypto_hash,
     }
 
     agent_result = await _agent_engine_request("POST", "agents/", user_id, json_body=agent_data)
     agent_id = agent_result.get("id", "")
-    logger.info(f"OpenClaw agent registered: user={user_id} agent={agent_id} name={body.name}")
+    logger.info(f"OpenClaw agent registered: user={user_id} agent={agent_id} name={body.name} hash={agent_crypto_hash[:16]}...")
 
     # 2. Create webhook trigger for this agent
     wh_secret = secrets.token_hex(settings.DEFAULT_SECRET_LENGTH)
@@ -636,7 +706,10 @@ async def register_openclaw_agent(body: OpenClawAgentRegister, request: Request)
         name=body.name,
         agent_source="openclaw",
         dsid=agent_result.get("dsid"),
-        agent_public_hash=agent_result.get("agent_public_hash"),
+        agent_public_hash=agent_crypto_hash,
+        agent_crypto_hash=agent_crypto_hash,
+        agent_semantic_hash=agent_semantic_hash,
+        agent_universe_id=agent_universe_id,
         webhook_url=_build_webhook_url(agent_id) if wh_secret else "",
         webhook_secret=wh_secret,
         memory_mode=body.memory_mode,
