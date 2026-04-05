@@ -202,13 +202,94 @@ The OpenClaw connector is a lightweight bridge service that connects your local 
 | `run_command` | Run shell command |
 | `command_status` | Check background command status |
 
-### Tool Management (4 tools)
+### Tool Management & Self-Creation (6 tools)
 | Tool | Description |
 |------|-------------|
-| `create_tool` | Create custom HTTP tool stored in DB |
-| `list_tools` | List user's custom tools |
+| `create_tool` | Create custom HTTP tool stored in DB. Set `is_shared=true` to make it platform-wide |
+| `list_tools` | List user's custom tools + all shared platform tools |
 | `delete_tool` | Delete a custom tool |
 | `update_tool` | Update an existing custom tool |
+| `auto_build_tool` | **LLM designs, validates (AST safety scan), and registers a new tool at runtime.** Describe what the tool should do and it will be auto-created |
+| `check_tool_exists` | Check if a capability exists as a tool. If not found, suggests using `auto_build_tool` |
+
+---
+
+## Self-Creating Tools — Agents Build What They Need
+
+One of the most powerful capabilities of the platform is that **agents can create their own tools at runtime**. If an agent needs a capability that doesn't exist, it can design, validate, and register a new tool — and that tool immediately becomes available to the entire platform.
+
+### How It Works
+
+```
+Agent needs a tool that doesn't exist
+       │
+       ▼
+┌──────────────────────────────────────┐
+│  1. check_tool_exists               │  ← Search 137+ built-in + all custom tools
+│     "I need to track package prices" │
+└──────────────┬───────────────────────┘
+               │ Not found → suggests auto_build_tool
+               ▼
+┌──────────────────────────────────────┐
+│  2. auto_build_tool                  │  ← LLM designs the tool spec
+│     capability: "Track package       │
+│     shipping prices from carriers"   │
+│                                      │
+│     → LLM generates: tool_name,     │
+│       description, endpoint_url,     │
+│       http_method, parameters,       │
+│       request_body, category         │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  3. AST Safety Scan                  │  ← Validates no forbidden URLs,
+│     No localhost, no metadata,       │     no SSRF patterns, valid schema
+│     no file://, valid JSON           │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  4. Registered in DB                 │  ← Stored in agentic_custom_tools
+│     is_shared=true → platform-wide   │     category auto-assigned
+│     Immediately available to ALL     │     Cache invalidated for all users
+│     agents across the platform       │
+└──────────────────────────────────────┘
+```
+
+### Key Features
+
+- **LLM-Designed**: Agent describes what it needs in natural language → LLM generates the full tool spec
+- **Safety-Scanned**: Every auto-built tool goes through AST safety validation (no SSRF, no internal endpoints)
+- **Platform-Wide**: Set `is_shared=true` (default) and the tool is available to ALL users and agents
+- **DB-Persisted**: Tools survive restarts, stored in PostgreSQL `agentic_custom_tools` table
+- **Category Auto-Assignment**: Tools are categorized automatically (or use a custom category)
+- **Immediate Availability**: No restart needed — tool is usable in the same conversation
+
+### Example: Agent Creates a Tool
+
+```json
+// Agent calls auto_build_tool
+{
+  "capability": "Get real-time cryptocurrency fear and greed index",
+  "category": "market_data",
+  "is_shared": true
+}
+
+// LLM designs and registers:
+{
+  "tool_name": "crypto_fear_greed_index",
+  "description": "Get the current cryptocurrency Fear & Greed Index",
+  "endpoint_url": "https://api.alternative.me/fng/?limit=1",
+  "http_method": "GET",
+  "parameters": {"limit": "number of data points"},
+  "category": "market_data",
+  "is_shared": true
+}
+
+// Tool is now available platform-wide. Any agent can call:
+// POST /skills/execute {"skill_name": "crypto_fear_greed_index", "parameters": {"limit": "1"}}
+```
 
 ---
 
