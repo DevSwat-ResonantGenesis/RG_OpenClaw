@@ -912,27 +912,41 @@ async def memory_query(body: MemoryBridgeQuery, request: Request):
 # SKILLS FEDERATION
 # ============================================
 
-PLATFORM_SKILLS = [
-    {"name": "web_search", "description": "Search the web using multiple engines", "category": "web", "risk_level": "low"},
-    {"name": "fetch_url", "description": "Fetch and extract content from a URL", "category": "web", "risk_level": "low"},
-    {"name": "code_visualizer", "description": "Analyze code repositories and generate architecture reports", "category": "developer-tools", "risk_level": "low"},
-    {"name": "memory_search", "description": "Search long-term Hash Sphere memory", "category": "memory", "risk_level": "low"},
-    {"name": "memory_store", "description": "Store new memories in Hash Sphere", "category": "memory", "risk_level": "low"},
-    {"name": "web_scrape", "description": "Advanced web scraping with content extraction", "category": "web", "risk_level": "medium"},
-    {"name": "file_create", "description": "Create files on the platform", "category": "filesystem", "risk_level": "medium"},
-    {"name": "api_call", "description": "Make HTTP requests to external APIs", "category": "network", "risk_level": "medium"},
-]
+# Platform tools are now loaded dynamically from the unified registry
+# via agent_engine_service /tools/list endpoint — no hardcoded list
+_cached_platform_tools = None
+_cached_at = None
+
+async def _fetch_platform_tools() -> list:
+    """Fetch all platform tools from agent_engine unified registry (cached 5 min)."""
+    global _cached_platform_tools, _cached_at
+    import time
+    if _cached_platform_tools and _cached_at and (time.time() - _cached_at) < 300:
+        return _cached_platform_tools
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{settings.AGENT_ENGINE_URL}/agents/tools/list")
+            if resp.status_code == 200:
+                data = resp.json()
+                _cached_platform_tools = data.get("tools", [])
+                _cached_at = time.time()
+                return _cached_platform_tools
+    except Exception as e:
+        logger.warning(f"Failed to fetch platform tools: {e}")
+    return _cached_platform_tools or []
 
 
 @router.get("/skills/available")
 async def list_available_skills(request: Request):
     """
-    List all platform skills available to OpenClaw agents.
+    List ALL 159+ platform tools available to OpenClaw agents.
     
-    Includes both built-in platform skills and any custom skills
-    registered by this user's OpenClaw agents.
+    Fetches dynamically from the unified tool registry via agent_engine.
+    Also includes any custom skills registered by OpenClaw agents.
     """
     user_id = _get_user_id(request)
+
+    platform_tools = await _fetch_platform_tools()
 
     # Collect custom skills from all user's openclaw agents
     all_custom = []
@@ -941,9 +955,9 @@ async def list_available_skills(request: Request):
             all_custom.append({**s, "source": "openclaw_custom"})
 
     return {
-        "platform_skills": PLATFORM_SKILLS,
+        "platform_skills": platform_tools,
         "custom_skills": all_custom,
-        "total": len(PLATFORM_SKILLS) + len(all_custom),
+        "total": len(platform_tools) + len(all_custom),
     }
 
 
@@ -977,24 +991,24 @@ async def execute_skill(body: SkillExecuteRequest, request: Request):
                 except Exception as e:
                     return SkillExecuteResponse(success=False, error=str(e), skill_name=body.skill_name)
 
-    # Platform skill — route to agent_engine_service for execution
+    # Platform tool — execute directly via agent_engine /tools/execute
     try:
-        result = await _agent_engine_request(
-            "POST",
-            f"agents/{body.agent_id}/execute",
-            user_id,
-            json_body={
-                "goal": f"Execute skill: {body.skill_name}",
-                "context": {"skill": body.skill_name, "parameters": body.parameters},
-            },
-        )
-        return SkillExecuteResponse(
-            success=True,
-            result=result,
-            skill_name=body.skill_name,
-        )
-    except HTTPException as e:
-        return SkillExecuteResponse(success=False, error=str(e.detail), skill_name=body.skill_name)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{settings.AGENT_ENGINE_URL}/agents/tools/execute",
+                json={"tool_name": body.skill_name, "tool_input": body.parameters or {}},
+                headers={
+                    "x-user-id": user_id,
+                    "x-internal-service-key": settings.INTERNAL_SERVICE_KEY,
+                },
+            )
+            data = resp.json()
+            return SkillExecuteResponse(
+                success=data.get("success", False),
+                result=data.get("result"),
+                error=data.get("error"),
+                skill_name=body.skill_name,
+            )
     except Exception as e:
         return SkillExecuteResponse(success=False, error=str(e), skill_name=body.skill_name)
 
