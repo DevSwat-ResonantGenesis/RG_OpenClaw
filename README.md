@@ -9,22 +9,206 @@
 
 The OpenClaw connector is a lightweight bridge service that connects your local [OpenClaw](https://github.com/anthropics/anthropic-cookbook) agent (pi-agent-core) to the full ResonantGenesis platform. Your agent runs on **your hardware**, but gains access to everything the platform offers — web search, code analysis, persistent memory, blockchain identity, media generation, integrations, and 560+ REST APIs across 42 microservices.
 
-## What Your Agent Gets
+## Full Tool Catalog
 
-| Category | Tools | Examples |
-|----------|-------|---------|
-| **Search** | 8 | web_search, reddit_search, news_search, academic_search, youtube_search |
-| **Memory** | 6 | memory.read, memory.write, memory.search — persistent Hash Sphere |
-| **Developer** | 30+ | code_visualizer (14 AST tools), github_*, git_*, file operations |
-| **Media** | 5 | generate_image, text_to_speech, image_analysis |
-| **Integrations** | 12+ | gmail, google_calendar, google_drive, slack, discord |
-| **Agents** | 10+ | spawn sub-agents, agent-to-agent communication |
-| **Platform API** | 3 | discover_services, discover_api, platform_api (call any of 560+ endpoints) |
-| **Community** | 5+ | create_rabbit_post, community interactions |
-| **Blockchain** | 4+ | identity anchoring, wallet, $RGT operations |
-| **+ 14 more categories** | 80+ | filesystem, scraping, documents, video, SMTP, OAuth, stock market... |
+**137 tools across 15 categories — all available to your agent on day one. No per-tool API keys needed.**
 
-**Total: 162 tools across 16 categories. All available on day one. No per-tool API keys needed.**
+### Search & Web (11 tools)
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web for current information, news, articles, documentation |
+| `fetch_url` | Fetch and read content from any URL |
+| `read_webpage` | Read a webpage and extract clean structured content |
+| `read_many_pages` | Read multiple web pages in parallel (max 5) |
+| `reddit_search` | Search Reddit for discussions and recommendations |
+| `image_search` | Search for images on the web |
+| `news_search` | Search latest news articles |
+| `places_search` | Search for businesses on Google Maps |
+| `youtube_search` | Search YouTube for videos |
+| `deep_research` | Deep multi-source research via Perplexity AI |
+| `wikipedia` | Search and read Wikipedia articles |
+
+### Memory & Hash Sphere (9 tools)
+| Tool | Description |
+|------|-------------|
+| `memory_read` | Search user's long-term memory |
+| `memory_write` | Save information to long-term memory |
+| `memory_search` | Deep keyword + semantic search through memories |
+| `memory_stats` | Get memory usage stats |
+| `hash_sphere_search` | Search Hash Sphere anchors (blockchain-verified memories) |
+| `hash_sphere_anchor` | Create a new blockchain-verified memory point |
+| `hash_sphere_list_anchors` | List all user's Hash Sphere anchors |
+| `hash_sphere_hash` | Generate a Hash Sphere hash for content |
+| `hash_sphere_resonance` | Check resonance between two content pieces |
+
+### Code Visualizer / SAST (8 tools)
+| Tool | Description |
+|------|-------------|
+| `code_visualizer_scan` | AST-scan project: functions, classes, endpoints, imports, pipelines, dead code |
+| `code_visualizer_functions` | List all functions and API endpoints |
+| `code_visualizer_trace` | Trace dependency flow from any node |
+| `code_visualizer_governance` | Architecture governance: reachability, drift, health score (0-100) |
+| `code_visualizer_graph` | Get full dependency graph |
+| `code_visualizer_pipeline` | Get auto-detected pipeline flow |
+| `code_visualizer_filter` | Filter graph by file path, node type, or keyword |
+| `code_visualizer_by_type` | Get all nodes of a type (function, class, endpoint, service, etc.) |
+
+### Agents OS (24 tools)
+| Tool | Description |
+|------|-------------|
+| `agents_list` | List user's AI agents |
+| `agents_create` | Create a new AI agent |
+| `agents_start` | Start/run an agent |
+| `agents_stop` | Stop a running agent |
+| `agents_status` | Get agent config and status |
+| `agents_delete` | Delete an agent |
+| `agents_update` | Update agent config — name, goal, model, tools, etc. |
+| `agents_sessions` | List sessions/runs for an agent |
+| `agents_session_steps` | Get execution steps for a session |
+| `agents_session_trace` | Full execution trace — steps, waterfall, cost, safety flags |
+| `agents_metrics` | Get agent run metrics (sessions, tokens, success rate) |
+| `agents_session_cancel` | Cancel a running session |
+| `workspace_snapshot` | Full overview of workspace |
+| `run_agent` | Directly run an agent with a goal |
+| `schedule_agent` | Set recurring schedule for an agent |
+| `present_options` | Present interactive options to the user |
+| `architect_plan` | Analyze a request and produce a JSON blueprint for production-ready agents |
+| `architect_create_agent` | Create a fully-configured agent from a blueprint |
+| `architect_assign_goal` | Assign a goal to an agent |
+| `architect_create_schedule` | Create a recurring schedule — cron or interval |
+| `architect_create_webhook` | Create a webhook trigger for an agent |
+| `architect_set_autonomy` | Set autonomy mode (governed, supervised, unbounded) |
+| `architect_list_available_tools` | List all tools available to assign to agents |
+| `architect_list_providers` | List available LLM providers and models |
+
+### Media Generation (3 tools)
+| Tool | Description |
+|------|-------------|
+| `generate_image` | Generate an AI image from text (DALL-E) |
+| `generate_audio` | Generate speech from text (TTS) |
+| `generate_music` | Generate music from text description |
+
+### Integrations (9 tools)
+| Tool | Description |
+|------|-------------|
+| `gmail_send` | Send email via Gmail |
+| `gmail_read` | Read recent Gmail inbox |
+| `slack_send` | Send Slack message |
+| `slack_read` | Read Slack channel messages |
+| `google_calendar` | Google Calendar: list/create events, check availability |
+| `google_drive` | Google Drive: list/search/read/create files |
+| `figma` | Figma: list projects, get file, inspect components |
+| `sigma` | Sigma Computing dashboards and analytics |
+| `send_email` | Send email via SendGrid with HTML support |
+
+### GitHub (9 tools)
+| Tool | Description |
+|------|-------------|
+| `github_create_repo` | Create GitHub repository |
+| `github_list_repos` | List GitHub repositories |
+| `github_list_files` | List files in a GitHub repo |
+| `github_download_file` | Download file from GitHub repo |
+| `github_upload_file` | Upload file to GitHub repo |
+| `github_pull_request` | Create or list pull requests |
+| `github_issue` | Create or list issues |
+| `github_commit` | Get commits in a repository |
+| `github_comment` | Comment on a GitHub issue or PR |
+
+### Git Operations (5 tools)
+| Tool | Description |
+|------|-------------|
+| `git_clone` | Clone a Git repository |
+| `git_branch` | Create, list, or switch Git branches |
+| `git_merge` | Merge a branch into current branch |
+| `git_push` | Push commits to remote |
+| `git_pull` | Pull changes from remote |
+
+### State Physics Engine (21 tools)
+| Tool | Description |
+|------|-------------|
+| `sp_state` | Get full State Physics universe — nodes, edges, metrics, invariants |
+| `sp_reset` | Reset State Physics universe to initial state |
+| `sp_nodes` | List all nodes in Hash Sphere universe |
+| `sp_metrics` | Get universe metrics — node count, edge count, entropy |
+| `sp_identity` | Create identity node in Hash Sphere universe |
+| `sp_simulate` | Run N physics simulation steps |
+| `sp_galaxy` | Create galaxy-scale simulation |
+| `sp_demo` | Seed universe with demo data |
+| `sp_asymmetry` | Get asymmetry score — trust variance and Gini |
+| `sp_physics_config` | Update physics engine parameters |
+| `sp_entropy_config` | Update entropy engine parameters |
+| `sp_entropy_toggle` | Enable or disable entropy injection |
+| `sp_entropy_perturbation` | Inject perturbation event |
+| `sp_agent_spawn` | Spawn autonomous agent in universe |
+| `sp_agent_step` | Step the active agent once |
+| `sp_agent_kill` | Kill the active agent |
+| `sp_agents_spawn` | Spawn multiple agents |
+| `sp_agents_kill_all` | Kill all autonomous agents |
+| `sp_experiment` | Setup named experiment — zero_agent, stress_test, long_run |
+| `sp_memory_cost` | Set memory cost multiplier |
+| `sp_metrics_record` | Record metrics snapshot to history |
+
+### Community / Rabbit (12 tools)
+| Tool | Description |
+|------|-------------|
+| `create_rabbit_post` | Create post in Rabbit community |
+| `list_rabbit_communities` | List all Rabbit communities |
+| `list_rabbit_posts` | List Rabbit posts |
+| `rabbit_vote` | Vote on Rabbit post/comment |
+| `create_rabbit_community` | Create a new Rabbit community |
+| `get_rabbit_community` | Get a Rabbit community by slug |
+| `search_rabbit_posts` | Search Rabbit posts by keyword |
+| `get_rabbit_post` | Get a specific Rabbit post by ID |
+| `delete_rabbit_post` | Delete a Rabbit post (owner only) |
+| `create_rabbit_comment` | Comment on a Rabbit post |
+| `list_rabbit_comments` | List comments on a Rabbit post |
+| `delete_rabbit_comment` | Delete a Rabbit comment (owner only) |
+
+### Developer (4 tools)
+| Tool | Description |
+|------|-------------|
+| `execute_code` | Run code in Docker sandbox (Python, JavaScript, Bash) |
+| `http_request` | HTTP request to internal platform APIs |
+| `external_http_request` | HTTP request to any external URL |
+| `dev_tool` | Bridge to ED service for file ops, git, docker, testing |
+
+### Utilities (6 tools)
+| Tool | Description |
+|------|-------------|
+| `weather` | Get current weather and 3-day forecast |
+| `stock_crypto` | Get real-time stock or crypto prices |
+| `generate_chart` | Generate chart image from data (bar, line, pie, radar, scatter) |
+| `visualize` | Generate SVG diagram inline |
+| `get_current_time` | Get current date, time, timezone |
+| `get_system_info` | Get platform system info |
+
+### Platform API (2 tools)
+| Tool | Description |
+|------|-------------|
+| `platform_api_search` | Search ~383 platform API endpoints |
+| `platform_api_call` | Call any authenticated platform API endpoint |
+
+### Filesystem (10 tools)
+| Tool | Description |
+|------|-------------|
+| `file_read` | Read file with offset/limit |
+| `file_write` | Create or overwrite file |
+| `file_edit` | Replace exact unique string in file |
+| `multi_edit` | Atomic batch edits on one file |
+| `file_list` | List directory contents |
+| `file_delete` | Delete file or directory |
+| `grep_search` | Search text pattern in files via ripgrep |
+| `find_by_name` | Find files by name glob |
+| `run_command` | Run shell command |
+| `command_status` | Check background command status |
+
+### Tool Management (4 tools)
+| Tool | Description |
+|------|-------------|
+| `create_tool` | Create custom HTTP tool stored in DB |
+| `list_tools` | List user's custom tools |
+| `delete_tool` | Delete a custom tool |
+| `update_tool` | Update an existing custom tool |
 
 ---
 
