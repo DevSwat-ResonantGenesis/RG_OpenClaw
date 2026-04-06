@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     MARKETPLACE_SERVICE_URL: str = os.getenv(
         "MARKETPLACE_SERVICE_URL", "http://marketplace_service:8000"
     )
+    LLM_SERVICE_URL: str = os.getenv(
+        "LLM_SERVICE_URL", "http://llm_service:8000"
+    )
 
     # OpenClaw Gateway (pi-agent-core runtime)
     OPENCLAW_GATEWAY_URL: str = os.getenv(

@@ -36,7 +36,11 @@ import hashlib
 import secrets
 import httpx
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import json
+import os
+import time
+import uuid
 
 from fastapi import APIRouter, Request, HTTPException, Header
 
@@ -1223,3 +1227,211 @@ async def marketplace_list(body: MarketplaceListRequest, request: Request):
     except Exception as e:
         logger.warning(f"Marketplace listing failed for {body.agent_id}: {e}")
         return {"status": "listed_partial", "agent_id": body.agent_id, "note": f"Agent marked for marketplace. Listing sync pending: {e}"}
+
+
+# ============================================
+# UNIFIED LLM PROXY (OpenAI-Compatible)
+# ============================================
+# Routes OpenClaw gateway LLM calls through the platform's
+# Unified LLM Service, which handles BYOK keys, provider
+# fallback chains, rate limiting, and model routing.
+# The gateway connects here instead of calling providers directly.
+# ============================================
+
+# Provider detection from model name
+_MODEL_PROVIDER_MAP = {
+    "llama": "groq", "mixtral": "groq", "gemma": "groq",
+    "gpt-": "openai", "o1": "openai", "o3": "openai", "o4": "openai",
+    "claude": "anthropic",
+    "gemini": "gemini",
+    "deepseek": "deepseek",
+    "mistral": "mistral",
+}
+
+# BYOK key cache: user_id → {provider: key, ...}
+_byok_cache: Dict[str, Dict[str, Any]] = {}
+_BYOK_CACHE_TTL = 300  # 5 minutes
+
+
+async def _fetch_byok_keys(user_id: str) -> Dict[str, str]:
+    """Fetch user's BYOK API keys from auth service (cached)."""
+    now = time.time()
+    cached = _byok_cache.get(user_id)
+    if cached and now - cached.get("_ts", 0) < _BYOK_CACHE_TTL:
+        return {k: v for k, v in cached.items() if k != "_ts"}
+
+    keys = {}
+    try:
+        url = f"{settings.AUTH_SERVICE_URL}/auth/internal/user-api-keys/{user_id}"
+        headers = {"x-user-id": user_id}
+        if settings.INTERNAL_SERVICE_KEY:
+            headers["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                _alias = {"google": "gemini", "chatgpt": "openai", "claude": "anthropic"}
+                for entry in resp.json().get("keys", []):
+                    prov = entry.get("provider")
+                    key = entry.get("api_key")
+                    if prov and key:
+                        keys[_alias.get(prov.lower(), prov.lower())] = key
+    except Exception as e:
+        logger.warning(f"[LLM-Proxy] BYOK fetch failed for {user_id}: {e}")
+
+    keys["_ts"] = now
+    _byok_cache[user_id] = keys
+    if keys:
+        real_keys = {k: v for k, v in keys.items() if k != "_ts"}
+        if real_keys:
+            logger.info(f"[LLM-Proxy] BYOK loaded for {user_id}: {list(real_keys.keys())}")
+    return {k: v for k, v in keys.items() if k != "_ts"}
+
+
+def _detect_provider(model: str) -> Optional[str]:
+    """Detect provider from model name."""
+    model_lower = (model or "").lower()
+    for pattern, provider in _MODEL_PROVIDER_MAP.items():
+        if pattern in model_lower:
+            return provider
+    return None
+
+
+@router.post("/v1/chat/completions")
+async def llm_proxy_chat_completions(request: Request):
+    """
+    OpenAI-compatible chat completions proxy.
+
+    Routes OpenClaw gateway LLM calls through the platform's Unified LLM
+    Service, which handles BYOK keys, provider fallback, and model routing.
+
+    The gateway calls this instead of hitting OpenAI/Groq/Anthropic directly.
+    No hardcoded API keys needed in openclaw.json.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    temperature = body.get("temperature", 0.7)
+    max_tokens = body.get("max_tokens", 4096)
+    tools = body.get("tools")
+    tool_choice = body.get("tool_choice")
+    stream = body.get("stream", False)
+
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+
+    # Detect provider from model name
+    provider = _detect_provider(model)
+
+    # Try to get user_id for BYOK (gateway can pass via header)
+    user_id = (
+        request.headers.get("x-user-id")
+        or request.headers.get("x-openclaw-user-id")
+        or ""
+    )
+
+    # Fetch BYOK keys if we have a user_id
+    user_api_keys = {}
+    if user_id:
+        user_api_keys = await _fetch_byok_keys(user_id)
+
+    # Build request for platform LLM service
+    llm_payload = {
+        "messages": [
+            {"role": m.get("role", "user"), "content": m.get("content", "")}
+            for m in messages if m.get("content")
+        ],
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "provider": provider,
+    }
+    if tools:
+        llm_payload["tools"] = tools
+    if tool_choice:
+        llm_payload["tool_choice"] = tool_choice
+    if user_id:
+        llm_payload["user_id"] = user_id
+    if user_api_keys:
+        llm_payload["user_api_keys"] = user_api_keys
+
+    # Forward to platform LLM service
+    llm_url = f"{settings.LLM_SERVICE_URL}/llm/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if settings.INTERNAL_SERVICE_KEY:
+        headers["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+    if user_id:
+        headers["x-user-id"] = user_id
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(llm_url, json=llm_payload, headers=headers)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                # LLM service may return its own format — normalize to OpenAI format
+                if "choices" in data:
+                    # Already OpenAI-compatible
+                    logger.info(f"[LLM-Proxy] OK model={model} provider={provider} user={user_id or 'platform'}")
+                    return data
+                else:
+                    # Wrap in OpenAI format
+                    content = data.get("content", data.get("text", ""))
+                    usage = data.get("usage", {})
+                    tool_calls_resp = data.get("tool_calls", [])
+
+                    message = {"role": "assistant", "content": content}
+                    if tool_calls_resp:
+                        message["tool_calls"] = tool_calls_resp
+                        message["content"] = content or None
+
+                    openai_response = {
+                        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": data.get("model", model),
+                        "choices": [{
+                            "index": 0,
+                            "message": message,
+                            "finish_reason": "tool_calls" if tool_calls_resp else "stop",
+                        }],
+                        "usage": {
+                            "prompt_tokens": usage.get("prompt_tokens", usage.get("input_tokens", 0)),
+                            "completion_tokens": usage.get("completion_tokens", usage.get("output_tokens", 0)),
+                            "total_tokens": usage.get("total_tokens", 0),
+                        },
+                    }
+                    logger.info(f"[LLM-Proxy] OK model={model} provider={data.get('provider', provider)} user={user_id or 'platform'}")
+                    return openai_response
+            else:
+                error_text = resp.text[:500]
+                logger.warning(f"[LLM-Proxy] LLM service returned {resp.status_code}: {error_text}")
+                # Return OpenAI-compatible error
+                return {
+                    "error": {
+                        "message": f"LLM service error: {error_text}",
+                        "type": "server_error",
+                        "code": resp.status_code,
+                    }
+                }
+    except httpx.TimeoutException:
+        logger.error(f"[LLM-Proxy] Timeout calling LLM service for model={model}")
+        return {
+            "error": {
+                "message": "LLM service timeout",
+                "type": "timeout",
+                "code": 504,
+            }
+        }
+    except Exception as e:
+        logger.error(f"[LLM-Proxy] Error: {e}")
+        return {
+            "error": {
+                "message": f"LLM proxy error: {str(e)[:300]}",
+                "type": "internal_error",
+                "code": 500,
+            }
+        }

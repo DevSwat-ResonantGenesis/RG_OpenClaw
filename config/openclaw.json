@@ -1,0 +1,58 @@
+{
+    "agents": {
+        "defaults": {
+            "model": {
+                "primary": "litellm/llama-3.3-70b-versatile",
+                "fallbacks": [
+                    "litellm/gpt-4o",
+                    "litellm/claude-sonnet-4-20250514"
+                ]
+            },
+            "workspace": "/home/node/.openclaw/workspace",
+            "timeoutSeconds": 7200
+        }
+    },
+    "models": {
+        "providers": {
+            "litellm": {
+                "baseUrl": "http://openclaw_service:8000",
+                "api": "openai-completions",
+                "apiKey": "platform-internal",
+                "models": [
+                    {
+                        "id": "llama-3.3-70b-versatile",
+                        "name": "Llama 3.3 70B (via Platform)",
+                        "reasoning": false,
+                        "input": ["text"],
+                        "contextWindow": 131072,
+                        "maxTokens": 8192
+                    },
+                    {
+                        "id": "gpt-4o",
+                        "name": "GPT-4o (via Platform)",
+                        "reasoning": true,
+                        "input": ["text", "image"],
+                        "contextWindow": 128000,
+                        "maxTokens": 4096
+                    },
+                    {
+                        "id": "claude-sonnet-4-20250514",
+                        "name": "Claude Sonnet 4 (via Platform)",
+                        "reasoning": true,
+                        "input": ["text", "image"],
+                        "contextWindow": 200000,
+                        "maxTokens": 8192
+                    }
+                ]
+            }
+        }
+    },
+    "env": {},
+    "gateway": {
+        "mode": "local",
+        "bind": "lan",
+        "auth": {
+            "mode": "token"
+        }
+    }
+}
