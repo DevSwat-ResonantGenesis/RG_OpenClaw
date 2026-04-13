@@ -764,28 +764,21 @@ async def register_openclaw_agent(body: OpenClawAgentRegister, request: Request)
     except Exception as e:
         logger.warning(f"Hash Sphere identity store failed: {e}")
 
-    # 1. Create agent on agent_engine_service with source=openclaw
-    agent_data = {
+    # 1. Register via /federation/register — sets agent_source='federated' + stores openclaw_config
+    federation_data = {
         "name": body.name,
         "description": body.description or f"OpenClaw agent running on user hardware",
-        "system_prompt": body.system_prompt,
-        "provider": body.provider or "local",
-        "model": body.model,
-        "temperature": body.temperature,
-        "max_tokens": body.max_tokens,
-        "tools": body.tools or ["web_search", "fetch_url"],
-        "mode": body.mode,
-        "agent_source": "openclaw",
-        "openclaw_config": openclaw_config,
-        "agent_public_hash": agent_crypto_hash,
+        "connection_url": f"http://localhost:8000",
+        "hardware_info": openclaw_config.get("hardware_info", {}),
+        "client_version": f"openclaw-connector/{settings.SERVICE_VERSION}",
+        "capabilities": body.tools or ["web_search", "fetch_url"],
+        "tools": body.tools or ["web_search", "fetch_url", "memory_read", "memory_write"],
+        "provider": body.provider or "groq",
+        "model": body.model or "llama-3.3-70b-versatile",
     }
 
-    # Check for superuser in request headers
-    is_superuser = (request.headers.get("x-is-superuser") or "").strip().lower() in {"1", "true", "yes", "on"}
-    extra_headers = {"x-is-superuser": "true"} if is_superuser else {}
-
-    agent_result = await _agent_engine_request("POST", "agents/", user_id, json_body=agent_data, extra_headers=extra_headers)
-    agent_id = agent_result.get("id", "")
+    agent_result = await _agent_engine_request("POST", "federation/register", user_id, json_body=federation_data, timeout=30.0)
+    agent_id = agent_result.get("agent_id") or agent_result.get("id", "")
     logger.info(f"OpenClaw agent registered: user={user_id} agent={agent_id} name={body.name} hash={agent_crypto_hash[:16]}...")
 
     # 2. Create webhook trigger for this agent
