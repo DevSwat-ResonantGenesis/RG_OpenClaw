@@ -1250,9 +1250,14 @@ async def _llm_agent_execute(
         msg = choice.get("message", {})
         finish = choice.get("finish_reason", "stop")
 
-        # If no tool calls, we have the final answer
-        tool_calls = msg.get("tool_calls", [])
-        if not tool_calls or finish == "stop":
+        # tool_calls can be at message level OR choice level depending on LLM service
+        tool_calls = msg.get("tool_calls") or choice.get("tool_calls") or []
+        # Ensure msg has tool_calls for the messages list
+        if tool_calls and not msg.get("tool_calls"):
+            msg["tool_calls"] = tool_calls
+
+        # If no tool calls AND not a tool_calls finish reason, we have the final answer
+        if (not tool_calls and finish != "tool_calls"):
             final_text = msg.get("content", "")
             if final_text:
                 # Save result to memory
