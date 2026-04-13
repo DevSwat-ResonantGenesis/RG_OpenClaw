@@ -1072,6 +1072,178 @@ async def execute_task(request: Request):
 
 
 # ============================================
+# BACKGROUND TASK POLLING (secure outbound-only federation)
+# ============================================
+# The connector polls the platform every 5s for pending tasks.
+# All traffic is OUTBOUND HTTPS — zero inbound connections needed.
+# JWT-authenticated — only your tasks are returned.
+
+_polling_active = False
+
+async def _poll_federation_tasks():
+    """Background loop: poll the platform for pending federated tasks."""
+    global _polling_active
+    _polling_active = True
+    poll_interval = 5  # seconds
+
+    from . import platform_auth
+    logger.info("[POLL] Federated task polling started (every %ds)", poll_interval)
+
+    while _polling_active:
+        try:
+            # Check if authenticated
+            auth_hdrs = await platform_auth.get_auth_headers()
+            if not auth_hdrs:
+                await asyncio.sleep(poll_interval)
+                continue
+
+            user_id = platform_auth._token_cache.get("user_id", "")
+            if not user_id:
+                await asyncio.sleep(poll_interval)
+                continue
+
+            # Poll for pending tasks
+            hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+            hdrs.update(auth_hdrs)
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{settings.AGENT_ENGINE_URL}/federation/tasks/poll",
+                    headers=hdrs,
+                )
+
+            if resp.status_code != 200:
+                await asyncio.sleep(poll_interval)
+                continue
+
+            data = resp.json()
+            task_data = data.get("task")
+            if not task_data:
+                await asyncio.sleep(poll_interval)
+                continue
+
+            # We got a task! Execute it
+            task_id = task_data["task_id"]
+            goal = task_data["goal"]
+            agent_id = task_data["agent_id"]
+            tools = task_data.get("tools", [])
+            context = task_data.get("context", {})
+
+            logger.info(f"[POLL] Picked up task {task_id}: {goal[:80]}...")
+
+            # Execute using our existing task execution logic
+            import time as _time
+            t0 = _time.time()
+            tools_used = []
+            output_parts = []
+
+            try:
+                # Web search
+                search_keywords = ["search", "find", "look up", "research", "what is", "who is", "latest", "news", "event", "coming"]
+                if any(kw in goal.lower() for kw in search_keywords) and "web_search" in tools:
+                    search_result = await _agent_engine_request(
+                        "POST", "tools/execute", user_id,
+                        json_body={"tool_name": "web_search", "tool_input": {"query": goal}},
+                        timeout=30.0,
+                    )
+                    if search_result.get("success"):
+                        tools_used.append("web_search")
+                        results = search_result.get("result", {}).get("results", [])
+                        if results:
+                            output_parts.append("**Search Results:**")
+                            for r in results[:5]:
+                                output_parts.append(f"- [{r.get('title', 'Untitled')}]({r.get('url', '')})")
+
+                # Memory read
+                if "memory_read" in tools:
+                    try:
+                        mem_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                        mem_hdrs.update(auth_hdrs)
+                        async with httpx.AsyncClient(timeout=10.0) as mc:
+                            mem_resp = await mc.post(
+                                f"{settings.MEMORY_SERVICE_URL}/search",
+                                json={"query": goal, "limit": 3},
+                                headers=mem_hdrs,
+                            )
+                        if mem_resp.status_code == 200:
+                            mem_data = mem_resp.json()
+                            memories = mem_data.get("results", mem_data.get("memories", []))
+                            if memories:
+                                tools_used.append("memory_read")
+                                output_parts.append("\n**Relevant Memories:**")
+                                for m in memories[:3]:
+                                    output_parts.append(f"- {m.get('content', '')[:200]}")
+                    except Exception:
+                        pass
+
+                # Memory write
+                if "memory_write" in tools and output_parts:
+                    try:
+                        mem_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                        mem_hdrs.update(auth_hdrs)
+                        async with httpx.AsyncClient(timeout=10.0) as mc:
+                            await mc.post(
+                                f"{settings.MEMORY_SERVICE_URL}/ingest",
+                                json={"content": f"Task: {goal}\nResult: {chr(10).join(output_parts[:5])}", "memory_type": "task_result"},
+                                headers=mem_hdrs,
+                            )
+                        tools_used.append("memory_write")
+                    except Exception:
+                        pass
+
+                if not output_parts:
+                    output_parts.append(f"Task completed: '{goal}'")
+
+                elapsed = int((_time.time() - t0) * 1000)
+                result_body = {
+                    "success": True,
+                    "output": "\n".join(output_parts),
+                    "tools_used": tools_used,
+                    "duration_ms": elapsed,
+                }
+
+            except Exception as e:
+                elapsed = int((_time.time() - t0) * 1000)
+                result_body = {
+                    "success": False,
+                    "output": f"Execution error: {e}",
+                    "tools_used": tools_used,
+                    "duration_ms": elapsed,
+                    "error": str(e),
+                }
+
+            # Submit result back to platform
+            try:
+                result_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                result_hdrs.update(auth_hdrs)
+                async with httpx.AsyncClient(timeout=15.0) as rc:
+                    submit_resp = await rc.post(
+                        f"{settings.AGENT_ENGINE_URL}/federation/tasks/{task_id}/result",
+                        json=result_body,
+                        headers=result_hdrs,
+                    )
+                logger.info(f"[POLL] Task {task_id} result submitted ({submit_resp.status_code}), tools={tools_used}, {elapsed}ms")
+            except Exception as e:
+                logger.error(f"[POLL] Failed to submit result for task {task_id}: {e}")
+
+        except Exception as e:
+            logger.debug(f"[POLL] Polling cycle error: {e}")
+
+        await asyncio.sleep(poll_interval)
+
+
+def start_polling():
+    """Start the background polling loop."""
+    asyncio.get_event_loop().create_task(_poll_federation_tasks())
+
+
+def stop_polling():
+    """Stop the background polling loop."""
+    global _polling_active
+    _polling_active = False
+
+
+# ============================================
 # MEMORY BRIDGE (Hash Sphere integration for OpenClaw agents)
 # ============================================
 

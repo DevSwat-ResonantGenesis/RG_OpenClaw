@@ -69,7 +69,9 @@ async def root():
             "memory_ingest": "POST /memory/ingest",
             "memory_query": "POST /memory/query",
             "manifest": "GET /manifest",
+            "task_execute": "POST /task/execute",
             "setup_guide": "GET /setup-guide",
+            "polling": "Active — checks platform every 5s for tasks",
         },
         "docs": "http://localhost:8000/docs",
     }
@@ -81,8 +83,14 @@ async def startup():
         f"🦞 OpenClaw Service v{settings.SERVICE_VERSION} started "
         f"(enabled={settings.ENABLED}, domain={settings.PLATFORM_DOMAIN})"
     )
+    # Start background polling for federated tasks
+    from .routers import start_polling
+    start_polling()
+    logger.info("🦞 Federated task polling active — polling platform every 5s")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    from .routers import stop_polling
+    stop_polling()
     logger.info("🦞 OpenClaw Service shutting down")
