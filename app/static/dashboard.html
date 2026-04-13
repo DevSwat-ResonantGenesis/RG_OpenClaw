@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClaw — Federated Agent Connector</title>
+<style>
+  :root {
+    --bg: #0a0e17; --bg2: #111827; --bg3: #1f2937;
+    --text: #e5e7eb; --muted: #9ca3af;
+    --pink: #FA547C; --teal: #01A6BC; --green: #71C23E;
+    --orange: #FAA525; --yellow: #FFD800; --red: #ef4444;
+    --border: #1e293b;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',-apple-system,system-ui,sans-serif; min-height:100vh; }
+
+  /* Header */
+  .header { background:var(--bg2); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; }
+  .header-left { display:flex; align-items:center; gap:12px; }
+  .header h1 { font-size:20px; font-weight:700; letter-spacing:-0.5px; }
+  .header h1 .accent { color:var(--green); }
+  .header h1 .plus { color:var(--teal); font-weight:800; }
+  .logo { font-size:28px; }
+  .header-right { display:flex; align-items:center; gap:16px; font-size:13px; color:var(--muted); }
+  .status-pill { display:flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; }
+  .status-pill.online { background:rgba(113,194,62,0.1); color:var(--green); border:1px solid rgba(113,194,62,0.2); }
+  .status-pill.offline { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.2); }
+  .status-dot { width:7px; height:7px; border-radius:50%; }
+  .status-pill.online .status-dot { background:var(--green); box-shadow:0 0 6px var(--green); animation:pulse 2s infinite; }
+  .status-pill.offline .status-dot { background:var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Grid */
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; padding:20px 24px; }
+
+  /* Card */
+  .card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .card-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+  .card-header h2 { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); }
+  .card-header .icon { font-size:15px; }
+  .card-body { padding:16px 18px; }
+
+  /* Stats */
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .stat-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px; }
+  .stat-value { font-size:24px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stat-value.green { color:var(--green); }
+  .stat-value.teal { color:var(--teal); }
+  .stat-value.pink { color:var(--pink); }
+  .stat-value.orange { color:var(--orange); }
+  .stat-value.yellow { color:var(--yellow); }
+
+  /* Full width */
+  .full-width { grid-column: 1 / -1; }
+
+  /* Table */
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; padding:8px 10px; color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid var(--border); }
+  td { padding:8px 10px; border-bottom:1px solid rgba(30,41,59,0.5); font-variant-numeric:tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+  .badge-green { background:rgba(113,194,62,0.12); color:var(--green); }
+  .badge-teal { background:rgba(1,166,188,0.12); color:var(--teal); }
+  .badge-pink { background:rgba(250,84,124,0.12); color:var(--pink); }
+  .badge-orange { background:rgba(250,165,37,0.12); color:var(--orange); }
+  .badge-red { background:rgba(239,68,68,0.12); color:var(--red); }
+  .badge-muted { background:rgba(156,163,175,0.1); color:var(--muted); }
+
+  /* Activity log */
+  .log-entry { padding:8px 0; border-bottom:1px solid rgba(30,41,59,0.4); font-size:13px; display:flex; gap:10px; }
+  .log-entry:last-child { border-bottom:none; }
+  .log-time { color:var(--muted); font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; min-width:70px; }
+  .log-msg { flex:1; }
+  .log-msg .tool { color:var(--teal); }
+  .log-msg .success { color:var(--green); }
+  .log-msg .error { color:var(--red); }
+
+  /* How it works */
+  .flow-step { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(30,41,59,0.3); align-items:flex-start; }
+  .flow-step:last-child { border-bottom:none; }
+  .flow-num { width:28px; height:28px; border-radius:50%; background:rgba(1,166,188,0.12); color:var(--teal); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .flow-text { font-size:13px; line-height:1.5; }
+  .flow-text strong { color:var(--text); }
+  .flow-text span { color:var(--muted); }
+
+  /* Refresh btn */
+  .refresh-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; transition:0.15s; }
+  .refresh-btn:hover { background:var(--teal); border-color:var(--teal); color:#fff; }
+
+  /* Link */
+  a { color:var(--teal); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  /* Footer */
+  .footer { text-align:center; padding:24px; font-size:12px; color:var(--muted); border-top:1px solid var(--border); margin-top:12px; }
+  .footer a { color:var(--teal); }
+
+  /* Scrollable card body */
+  .card-body.scroll { max-height:320px; overflow-y:auto; }
+  .card-body.scroll::-webkit-scrollbar { width:4px; }
+  .card-body.scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+
+  .empty-state { text-align:center; padding:32px; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <span class="logo">&#129438;</span>
+    <h1>Open<span class="accent">Claw</span><span class="plus">+</span> Connector</h1>
+  </div>
+  <div class="header-right">
+    <span id="auth-status" class="status-pill offline"><span class="status-dot"></span> Checking...</span>
+    <span id="poll-status" class="status-pill offline"><span class="status-dot"></span> Polling: --</span>
+    <button class="refresh-btn" onclick="refreshAll()">&#8635; Refresh</button>
+  </div>
+</div>
+
+<!-- Grid -->
+<div class="grid">
+
+  <!-- Connection Status -->
+  <div class="card">
+    <div class="card-header"><span class="icon">&#128994;</span><h2>Connection Status</h2></div>
+    <div class="card-body">
+      <div class="stats">
+        <div><div class="stat-label">Platform</div><div id="s-platform" class="stat-value teal" style="font-size:16px">--</div></div>
+        <div><div class="stat-label">Authenticated</div><div id="s-auth" class="stat-value green">--</div></div>
+        <div><div class="stat-label">User</div><div id="s-user" class="stat-value" style="font-size:14px;color:var(--muted)">--</div></div>
+        <div><div class="stat-label">Token TTL</div><div id="s-ttl" class="stat-value orange" style="font-size:18px">--</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Polling Stats -->
+  <div class="card">
+    <div class="card-header"><span class="icon">&#128259;</span><h2>Polling Status</h2></div>
+    <div class="card-body">
+      <div class="stats">
+        <div><div class="stat-label">Interval</div><div class="stat-value teal">5s</div></div>
+        <div><div class="stat-label">Polls Sent</div><div id="s-polls" class="stat-value green">--</div></div>
+        <div><div class="stat-label">Tasks Picked Up</div><div id="s-tasks-picked" class="stat-value pink">--</div></div>
+        <div><div class="stat-label">Last Poll</div><div id="s-last-poll" class="stat-value" style="font-size:14px;color:var(--muted)">--</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agents -->
+  <div class="card">
+    <div class="card-header"><span class="icon">&#129302;</span><h2>Registered Agents</h2></div>
+    <div class="card-body scroll" id="agents-list">
+      <div class="empty-state">Loading agents...</div>
+    </div>
+  </div>
+
+  <!-- Task History -->
+  <div class="card">
+    <div class="card-header"><span class="icon">&#128203;</span><h2>Task History</h2></div>
+    <div class="card-body scroll" id="task-history">
+      <div class="empty-state">No tasks yet. Click "Run" on your agent at <a href="https://dev-swat.com/agents" target="_blank">dev-swat.com/agents</a></div>
+    </div>
+  </div>
+
+  <!-- Activity Log -->
+  <div class="card full-width">
+    <div class="card-header"><span class="icon">&#128221;</span><h2>Live Activity Log</h2></div>
+    <div class="card-body scroll" id="activity-log" style="max-height:240px">
+      <div class="empty-state">Waiting for activity...</div>
+    </div>
+  </div>
+
+  <!-- How It Works -->
+  <div class="card full-width">
+    <div class="card-header"><span class="icon">&#9889;</span><h2>How Federated Polling Works</h2></div>
+    <div class="card-body">
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>You click "Run"</strong> <span>on your federated agent at dev-swat.com/agents</span></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Platform queues the task</strong> <span>in the federated_tasks table (status: pending)</span></div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>This connector polls</strong> <span>GET /federation/tasks/poll every 5 seconds (outbound HTTPS)</span></div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Task picked up</strong> <span>&#8594; executes locally using web_search, memory_read, memory_write</span></div></div>
+      <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Result submitted</strong> <span>via POST /federation/tasks/{id}/result &#8594; session completes in platform UI</span></div></div>
+      <div class="flow-step"><div class="flow-num">&#128274;</div><div class="flow-text"><strong>Zero inbound connections.</strong> <span>ALL traffic is outbound HTTPS. Works behind any firewall, NAT, or VPN. No ports exposed.</span></div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  OpenClaw+ Connector v1.0.0 &bull; <a href="https://dev-swat.com/openclaw" target="_blank">Documentation</a> &bull; <a href="https://github.com/DevSwat-ResonantGenesis/RG_OpenClaw" target="_blank">GitHub</a> &bull; <a href="https://dev-swat.com/agents" target="_blank">Platform Agents</a> &bull; <a href="/docs" target="_blank">API Docs</a>
+</div>
+
+<script>
+// State
+let pollCount = 0;
+let tasksPicked = 0;
+let activityLog = [];
+
+function addLog(msg, type) {
+  const now = new Date().toLocaleTimeString();
+  activityLog.unshift({ time: now, msg, type });
+  if (activityLog.length > 50) activityLog.pop();
+  renderLog();
+}
+
+function renderLog() {
+  const el = document.getElementById('activity-log');
+  if (!activityLog.length) { el.innerHTML = '<div class="empty-state">Waiting for activity...</div>'; return; }
+  el.innerHTML = activityLog.map(e => `
+    <div class="log-entry">
+      <span class="log-time">${e.time}</span>
+      <span class="log-msg">${e.msg}</span>
+    </div>
+  `).join('');
+}
+
+async function fetchStatus() {
+  try {
+    const r = await fetch('/auth/status');
+    const d = await r.json();
+    const authPill = document.getElementById('auth-status');
+    if (d.authenticated) {
+      authPill.className = 'status-pill online';
+      authPill.innerHTML = '<span class="status-dot"></span> Authenticated';
+      document.getElementById('s-auth').textContent = 'Yes';
+      document.getElementById('s-auth').className = 'stat-value green';
+      document.getElementById('s-user').textContent = d.email || '--';
+      document.getElementById('s-ttl').textContent = d.token_ttl_seconds ? Math.round(d.token_ttl_seconds / 60) + 'm' : '--';
+    } else {
+      authPill.className = 'status-pill offline';
+      authPill.innerHTML = '<span class="status-dot"></span> Not Authenticated';
+      document.getElementById('s-auth').textContent = 'No';
+      document.getElementById('s-auth').className = 'stat-value pink';
+      document.getElementById('s-user').textContent = '--';
+      document.getElementById('s-ttl').textContent = '--';
+    }
+    document.getElementById('s-platform').textContent = 'dev-swat.com';
+  } catch(e) {
+    document.getElementById('auth-status').className = 'status-pill offline';
+    document.getElementById('auth-status').innerHTML = '<span class="status-dot"></span> Error';
+  }
+}
+
+async function fetchDashboard() {
+  try {
+    const r = await fetch('/dashboard/data');
+    const d = await r.json();
+
+    // Polling stats
+    pollCount = d.poll_count || 0;
+    tasksPicked = d.tasks_picked || 0;
+    document.getElementById('s-polls').textContent = pollCount;
+    document.getElementById('s-tasks-picked').textContent = tasksPicked;
+    document.getElementById('s-last-poll').textContent = d.last_poll || 'Never';
+
+    const pollPill = document.getElementById('poll-status');
+    if (d.polling_active) {
+      pollPill.className = 'status-pill online';
+      pollPill.innerHTML = '<span class="status-dot"></span> Polling Active';
+    } else {
+      pollPill.className = 'status-pill offline';
+      pollPill.innerHTML = '<span class="status-dot"></span> Polling Stopped';
+    }
+
+    // Agents
+    const agentsEl = document.getElementById('agents-list');
+    const agents = d.agents || [];
+    if (!agents.length) {
+      agentsEl.innerHTML = '<div class="empty-state">No agents registered. <a href="https://dev-swat.com/agents" target="_blank">Create one</a> or use POST /agents/register</div>';
+    } else {
+      agentsEl.innerHTML = '<table><thead><tr><th>Name</th><th>Mode</th><th>Tools</th><th>Status</th></tr></thead><tbody>' +
+        agents.map(a => `<tr>
+          <td style="font-weight:600">${a.name}</td>
+          <td><span class="badge ${a.mode === 'unbounded' ? 'badge-green' : 'badge-orange'}">${a.mode}</span></td>
+          <td style="color:var(--muted)">${a.tools_count || 0}</td>
+          <td><span class="badge badge-teal">${a.status || 'online'}</span></td>
+        </tr>`).join('') + '</tbody></table>';
+    }
+
+    // Task history
+    const tasksEl = document.getElementById('task-history');
+    const tasks = d.tasks || [];
+    if (!tasks.length) {
+      tasksEl.innerHTML = '<div class="empty-state">No tasks yet. Click "Run" on your agent at <a href="https://dev-swat.com/agents" target="_blank">dev-swat.com/agents</a></div>';
+    } else {
+      tasksEl.innerHTML = '<table><thead><tr><th>Goal</th><th>Tools</th><th>Duration</th><th>Status</th></tr></thead><tbody>' +
+        tasks.map(t => `<tr>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.goal}">${t.goal}</td>
+          <td style="color:var(--teal);font-size:12px">${(t.tools_used || []).join(', ') || '-'}</td>
+          <td style="font-variant-numeric:tabular-nums">${t.duration_ms ? (t.duration_ms/1000).toFixed(1)+'s' : '-'}</td>
+          <td><span class="badge ${t.status === 'completed' ? 'badge-green' : t.status === 'failed' ? 'badge-red' : 'badge-orange'}">${t.status}</span></td>
+        </tr>`).join('') + '</tbody></table>';
+    }
+
+    // Activity log from server
+    if (d.recent_activity) {
+      d.recent_activity.forEach(a => {
+        if (!activityLog.find(l => l.time === a.time && l.msg === a.msg)) {
+          activityLog.unshift(a);
+        }
+      });
+      if (activityLog.length > 50) activityLog.splice(50);
+      renderLog();
+    }
+  } catch(e) {
+    console.error('Dashboard fetch error:', e);
+  }
+}
+
+function refreshAll() {
+  addLog('Manual refresh', 'info');
+  fetchStatus();
+  fetchDashboard();
+}
+
+// Initial load + auto-refresh
+fetchStatus();
+fetchDashboard();
+setInterval(fetchStatus, 10000);
+setInterval(fetchDashboard, 5000);
+addLog('<span class="success">Dashboard loaded</span> &#8212; auto-refreshing every 5s', 'info');
+</script>
+
+</body>
+</html>

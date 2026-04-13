@@ -1080,6 +1080,16 @@ async def execute_task(request: Request):
 # JWT-authenticated — only your tasks are returned.
 
 _polling_active = False
+_poll_stats = {"count": 0, "tasks_picked": 0, "last_poll": None, "activity": []}
+_task_log = []  # list of completed task summaries for dashboard
+
+def _add_activity(msg, msg_type="info"):
+    """Add entry to dashboard activity log."""
+    from datetime import datetime
+    entry = {"time": datetime.now().strftime("%H:%M:%S"), "msg": msg, "type": msg_type}
+    _poll_stats.setdefault("activity", []).insert(0, entry)
+    if len(_poll_stats["activity"]) > 50:
+        _poll_stats["activity"] = _poll_stats["activity"][:50]
 
 async def _poll_federation_tasks():
     """Background loop: poll the platform for pending federated tasks."""
@@ -1113,6 +1123,10 @@ async def _poll_federation_tasks():
                     headers=hdrs,
                 )
 
+            _poll_stats["count"] = _poll_stats.get("count", 0) + 1
+            from datetime import datetime
+            _poll_stats["last_poll"] = datetime.now().strftime("%H:%M:%S")
+
             if resp.status_code != 200:
                 await asyncio.sleep(poll_interval)
                 continue
@@ -1131,6 +1145,8 @@ async def _poll_federation_tasks():
             context = task_data.get("context", {})
 
             logger.info(f"[POLL] Picked up task {task_id}: {goal[:80]}...")
+            _poll_stats["tasks_picked"] = _poll_stats.get("tasks_picked", 0) + 1
+            _add_activity(f'<span class="tool">Task picked up:</span> {goal[:60]}...', 'info')
 
             # Execute using our existing task execution logic
             import time as _time
@@ -1223,6 +1239,16 @@ async def _poll_federation_tasks():
                         headers=result_hdrs,
                     )
                 logger.info(f"[POLL] Task {task_id} result submitted ({submit_resp.status_code}), tools={tools_used}, {elapsed}ms")
+                _task_log.insert(0, {
+                    "goal": goal[:100],
+                    "tools_used": tools_used,
+                    "duration_ms": elapsed,
+                    "status": "completed" if result_body.get("success") else "failed",
+                    "task_id": task_id,
+                })
+                if len(_task_log) > 20:
+                    _task_log[:] = _task_log[:20]
+                _add_activity(f'<span class="success">Task completed</span> — tools: <span class="tool">{", ".join(tools_used)}</span> — {elapsed}ms', 'success')
             except Exception as e:
                 logger.error(f"[POLL] Failed to submit result for task {task_id}: {e}")
 
