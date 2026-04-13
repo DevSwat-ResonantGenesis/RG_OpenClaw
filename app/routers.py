@@ -1139,9 +1139,8 @@ async def _poll_federation_tasks():
             output_parts = []
 
             try:
-                # Web search
-                search_keywords = ["search", "find", "look up", "research", "what is", "who is", "latest", "news", "event", "coming"]
-                if any(kw in goal.lower() for kw in search_keywords) and "web_search" in tools:
+                # Web search — always search when web_search is available (most tasks benefit)
+                if "web_search" in tools:
                     search_result = await _agent_engine_request(
                         "POST", "tools/execute", user_id,
                         json_body={"tool_name": "web_search", "tool_input": {"query": goal}},
