@@ -267,6 +267,80 @@ async def auth_status():
     }
 
 
+@router.get("/auth/oauth-start")
+async def auth_oauth_start(request: Request):
+    """Start OAuth redirect flow: redirect user to platform login page.
+    The platform will authenticate the user and redirect back to /auth-callback with the JWT.
+    """
+    from fastapi.responses import RedirectResponse
+
+    # Detect which port we're running on from the incoming request
+    host = request.headers.get("host", "localhost:8000")
+    port = host.split(":")[-1] if ":" in host else "8000"
+
+    # Redirect to platform's desktop-callback endpoint
+    # It checks the user's cookie, and if logged in, redirects to our /auth-callback with the token
+    callback_url = f"https://{settings.PLATFORM_DOMAIN}/auth/desktop-callback?port={port}"
+    return RedirectResponse(callback_url)
+
+
+@router.get("/auth-callback")
+async def auth_oauth_callback(request: Request, token: str = ""):
+    """Receive JWT from platform OAuth redirect.
+    After the user confirms login on dev-swat.com, the platform redirects here
+    with the token. We store it and show a success page.
+    """
+    from fastapi.responses import HTMLResponse
+
+    if not token:
+        return HTMLResponse("""
+        <html><body style="background:#121214;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center"><h2 style="color:#FA547C">Authentication Failed</h2><p>No token received. Please try again.</p>
+        <a href="/" style="color:#01A6BC">Back to Dashboard</a></div></body></html>
+        """, status_code=400)
+
+    # Decode JWT to extract user info (without full verification — platform already verified)
+    import json as _json, base64
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)  # pad base64
+        claims = _json.loads(base64.urlsafe_b64decode(payload_b64))
+        user_id = claims.get("sub", claims.get("user_id", ""))
+        email = claims.get("email", "")
+        exp = claims.get("exp", 0)
+    except Exception:
+        user_id, email, exp = "", "", 0
+
+    # Store token using platform_auth
+    from . import platform_auth
+    import time as _time
+    token_data = {
+        "access_token": token,
+        "refresh_token": "",  # Redirect flow doesn't give refresh token
+        "user_id": user_id,
+        "email": email,
+        "expires_at": exp if exp > 1e9 else _time.time() + 86400,  # fallback 24h
+        "platform_domain": settings.PLATFORM_DOMAIN,
+        "authenticated_at": _time.time(),
+    }
+    platform_auth._save_tokens(token_data)
+    platform_auth._token_cache = token_data
+
+    logger.info(f"OAuth callback: authenticated as {email} (user_id={user_id})")
+
+    return HTMLResponse(f"""
+    <html><body style="background:#121214;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
+    <div style="text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">&#129438;</div>
+      <h2 style="color:#71C23E;margin-bottom:8px">Connected!</h2>
+      <p style="color:#a0a0a8;margin-bottom:20px">Logged in as <strong style="color:#fff">{email or 'user'}</strong></p>
+      <p style="color:#a0a0a8;font-size:14px">Redirecting to dashboard...</p>
+    </div>
+    <script>setTimeout(function(){{ window.location.href = '/'; }}, 1500);</script>
+    </body></html>
+    """)
+
+
 @router.post("/auth/refresh")
 async def auth_refresh():
     """Force refresh the access token using stored refresh token."""

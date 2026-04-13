@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  OpenClaw Connector — macOS Launch Agent
+  ==========================================
+  Auto-starts on login. Auto-restarts if it crashes.
+  
+  INSTALL:
+    cp com.devswat.openclaw.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.devswat.openclaw.plist
+  
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.devswat.openclaw.plist
+    rm ~/Library/LaunchAgents/com.devswat.openclaw.plist
+  
+  LOGS:
+    tail -f ~/.openclaw/stdout.log
+    tail -f ~/.openclaw/stderr.log
+  
+  STATUS:
+    launchctl list | grep openclaw
+-->
+<dict>
+  <key>Label</key>
+  <string>com.devswat.openclaw</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>-m</string>
+    <string>uvicorn</string>
+    <string>app.main:app</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>61632</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/louie/CascadeProjects/RG/RG_OpenClaw</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/louie/.openclaw/stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/louie/.openclaw/stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

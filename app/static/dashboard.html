@@ -137,6 +137,16 @@
   .modal-actions .btn-cancel:hover { background:var(--bg); }
   .modal-error { color:var(--pink); font-size:12px; margin-bottom:10px; display:none; }
   .modal-success { color:var(--green); font-size:12px; margin-bottom:10px; display:none; }
+
+  /* OAuth button */
+  .oauth-btn { width:100%; padding:14px; border-radius:10px; border:none; cursor:pointer; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:10px; transition:0.2s; }
+  .oauth-btn.platform { background:linear-gradient(135deg, #01A6BC 0%, #0190A3 100%); color:#fff; box-shadow:0 4px 16px rgba(1,166,188,0.3); }
+  .oauth-btn.platform:hover { transform:translateY(-1px); box-shadow:0 6px 20px rgba(1,166,188,0.4); }
+  .divider { display:flex; align-items:center; gap:12px; margin:20px 0 16px; font-size:12px; color:var(--muted); }
+  .divider::before, .divider::after { content:''; flex:1; height:1px; background:var(--border); }
+  .manual-toggle { text-align:center; margin-bottom:12px; }
+  .manual-toggle a { color:var(--muted); font-size:12px; cursor:pointer; }
+  .manual-toggle a:hover { color:var(--teal); }
 </style>
 </head>
 <body>
@@ -159,19 +169,35 @@
 <div id="login-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideLogin()">
   <div class="modal">
     <h2>&#129438; Connect to Platform</h2>
-    <p>Log in with your dev-swat.com account to authenticate the connector.</p>
+    <p>Authenticate with your dev-swat.com account to start your connector.</p>
     <div id="login-error" class="modal-error"></div>
     <div id="login-success" class="modal-success"></div>
-    <form onsubmit="handleLogin(event)">
-      <label>Email</label>
-      <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" />
-      <label>Password</label>
-      <input type="password" id="login-password" placeholder="Your dev-swat.com password" required autocomplete="current-password" />
-      <div class="modal-actions">
-        <button type="button" class="btn-cancel" onclick="hideLogin()">Cancel</button>
-        <button type="submit" class="btn-primary" id="login-submit">Log In</button>
-      </div>
-    </form>
+
+    <!-- OAuth redirect button (primary) -->
+    <button class="oauth-btn platform" onclick="loginWithPlatform()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+      Login with DevSwat
+    </button>
+    <p style="text-align:center;font-size:11px;color:var(--muted);margin-top:8px">Opens dev-swat.com — confirm your session and get redirected back</p>
+
+    <div class="divider">or enter credentials manually</div>
+
+    <!-- Manual fallback (collapsed by default) -->
+    <div id="manual-login" style="display:none">
+      <form onsubmit="handleLogin(event)">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" />
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Your dev-swat.com password" required autocomplete="current-password" />
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" onclick="hideLogin()">Cancel</button>
+          <button type="submit" class="btn-primary" id="login-submit">Log In</button>
+        </div>
+      </form>
+    </div>
+    <div class="manual-toggle">
+      <a onclick="document.getElementById('manual-login').style.display=document.getElementById('manual-login').style.display==='none'?'block':'none'">Show manual login</a>
+    </div>
   </div>
 </div>
 
@@ -235,7 +261,7 @@
       <div class="flow-step"><div class="flow-num">1</div><div class="flow-text"><strong>You click "Run"</strong> <span>on your federated agent at dev-swat.com/agents</span></div></div>
       <div class="flow-step"><div class="flow-num">2</div><div class="flow-text"><strong>Platform queues the task</strong> <span>in the federated_tasks table (status: pending)</span></div></div>
       <div class="flow-step"><div class="flow-num">3</div><div class="flow-text"><strong>This connector polls</strong> <span>GET /federation/tasks/poll every 5 seconds (outbound HTTPS)</span></div></div>
-      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Task picked up</strong> <span>&#8594; executes locally using web_search, memory_read, memory_write</span></div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Task picked up</strong> <span>&#8594; LLM-driven agent loop uses ALL platform tools (memory, search, agents, media, integrations...)</span></div></div>
       <div class="flow-step"><div class="flow-num">5</div><div class="flow-text"><strong>Result submitted</strong> <span>via POST /federation/tasks/{id}/result &#8594; session completes in platform UI</span></div></div>
       <div class="flow-step"><div class="flow-num">&#128274;</div><div class="flow-text"><strong>Zero inbound connections.</strong> <span>ALL traffic is outbound HTTPS. Works behind any firewall, NAT, or VPN. No ports exposed.</span></div></div>
     </div>
@@ -455,6 +481,12 @@ function toggleOutput(idx) {
   row.style.display = visible ? 'none' : 'table-row';
 }
 
+function loginWithPlatform() {
+  // Redirect to /auth/oauth-start which sends user to dev-swat.com for login
+  // After confirming, they get redirected back with the JWT token
+  window.location.href = '/auth/oauth-start';
+}
+
 function refreshAll() {
   addLog('Manual refresh', 'info');
   fetchStatus();
@@ -467,6 +499,15 @@ fetchDashboard();
 setInterval(fetchStatus, 10000);
 setInterval(fetchDashboard, 5000);
 addLog('<span class="success">Dashboard loaded</span> &#8212; auto-refreshing every 5s', 'info');
+
+// Auto-show login modal if not authenticated after first status check
+setTimeout(async () => {
+  try {
+    const r = await fetch('/auth/status');
+    const d = await r.json();
+    if (!d.authenticated) showLogin();
+  } catch(e) {}
+}, 1500);
 </script>
 
 </body>
