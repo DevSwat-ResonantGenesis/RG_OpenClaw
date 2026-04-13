@@ -260,14 +260,27 @@ async def auth_status():
             if not user_id:
                 user_id = payload.get("sub", payload.get("user_id", ""))
             # Backfill into token cache so dashboard/data picks it up
-            if email and not tokens.get("email"):
-                tokens["email"] = email
-                platform_auth._token_cache["email"] = email
-                platform_auth._save_tokens(platform_auth._token_cache)
             if user_id and not tokens.get("user_id"):
                 tokens["user_id"] = user_id
                 platform_auth._token_cache["user_id"] = user_id
-                platform_auth._save_tokens(platform_auth._token_cache)
+            # Fetch email from platform if JWT doesn't have it
+            if not email and user_id:
+                try:
+                    auth_hdrs_tmp = {"Authorization": f"Bearer {tokens['access_token']}", "x-user-id": user_id}
+                    async with httpx.AsyncClient(timeout=5.0) as uc:
+                        me_resp = await uc.get(
+                            f"https://{settings.PLATFORM_DOMAIN}/auth/me",
+                            headers=auth_hdrs_tmp,
+                        )
+                        if me_resp.status_code == 200:
+                            me_data = me_resp.json()
+                            email = me_data.get("email", me_data.get("username", ""))
+                except Exception:
+                    pass
+            if email and not tokens.get("email"):
+                tokens["email"] = email
+                platform_auth._token_cache["email"] = email
+            platform_auth._save_tokens(platform_auth._token_cache)
         except Exception:
             pass
     expired = _time.time() >= expires_at
@@ -327,6 +340,20 @@ async def auth_oauth_callback(request: Request, token: str = ""):
         exp = claims.get("exp", 0)
     except Exception:
         user_id, email, exp = "", "", 0
+
+    # If JWT doesn't contain email, fetch from platform user service
+    if user_id and not email:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as uc:
+                me_resp = await uc.get(
+                    f"https://{settings.PLATFORM_DOMAIN}/auth/me",
+                    headers={"Authorization": f"Bearer {token}", "x-user-id": user_id},
+                )
+                if me_resp.status_code == 200:
+                    me_data = me_resp.json()
+                    email = me_data.get("email", me_data.get("username", ""))
+        except Exception:
+            pass
 
     # Store token using platform_auth
     from . import platform_auth
