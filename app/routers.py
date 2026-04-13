@@ -979,86 +979,22 @@ async def execute_task(request: Request):
     user_id = _get_user_id(request)
     logger.info(f"[TASK] Received platform task for agent {agent_id}: {task[:100]}...")
 
-    # Execute the task using platform tools
-    tools_used = []
-    output_parts = []
-
-    # Simple multi-step task execution using available platform tools
+    # Execute using LLM-driven ReAct agent loop (ALL platform tools)
     try:
-        # Step 1: If web_search is available and task seems to need it, search first
-        search_keywords = ["search", "find", "look up", "research", "what is", "who is", "latest", "news"]
-        if any(kw in task.lower() for kw in search_keywords) and "web_search" in available_tools:
-            search_result = await _agent_engine_request(
-                "POST", "tools/execute", user_id,
-                json_body={"tool_name": "web_search", "tool_input": {"query": task}},
-                timeout=30.0,
-            )
-            if search_result.get("success"):
-                tools_used.append("web_search")
-                results = search_result.get("result", {}).get("results", [])
-                if results:
-                    output_parts.append("**Search Results:**")
-                    for r in results[:5]:
-                        output_parts.append(f"- [{r.get('title', 'Untitled')}]({r.get('url', '')})")
-
-        # Step 2: If memory_read is available, check relevant memories
-        if "memory_read" in available_tools:
-            try:
-                from . import platform_auth
-                auth_hdrs = await platform_auth.get_auth_headers()
-                hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
-                hdrs.update(auth_hdrs)
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    mem_resp = await client.post(
-                        f"{settings.MEMORY_SERVICE_URL}/search",
-                        json={"query": task, "limit": 3},
-                        headers=hdrs,
-                    )
-                if mem_resp.status_code == 200:
-                    mem_data = mem_resp.json()
-                    memories = mem_data.get("results", mem_data.get("memories", []))
-                    if memories:
-                        tools_used.append("memory_read")
-                        output_parts.append("\n**Relevant Memories:**")
-                        for m in memories[:3]:
-                            content = m.get("content", "")[:200]
-                            output_parts.append(f"- {content}")
-            except Exception as e:
-                logger.debug(f"Memory read during task failed: {e}")
-
-        # Step 3: Store task result as memory
-        if "memory_write" in available_tools and output_parts:
-            try:
-                from . import platform_auth
-                auth_hdrs = await platform_auth.get_auth_headers()
-                hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
-                hdrs.update(auth_hdrs)
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(
-                        f"{settings.MEMORY_SERVICE_URL}/ingest",
-                        json={
-                            "content": f"Task: {task}\nResult: {chr(10).join(output_parts[:5])}",
-                            "memory_type": "task_result",
-                            "metadata": {"agent_id": agent_id, "source": "openclaw_task"},
-                        },
-                        headers=hdrs,
-                    )
-                tools_used.append("memory_write")
-            except Exception:
-                pass
-
+        from . import platform_auth
+        auth_hdrs = await platform_auth.get_auth_headers()
+        result = await _llm_agent_execute(
+            goal=task,
+            agent_id=agent_id,
+            available_tools=available_tools,
+            user_id=user_id,
+            auth_hdrs=auth_hdrs,
+            context=context,
+        )
         elapsed = int((_time.time() - t0) * 1000)
-
-        if not output_parts:
-            output_parts.append(f"Task received: '{task}'. Agent processed with {len(available_tools)} available tools.")
-
-        return {
-            "success": True,
-            "task_id": agent_id,
-            "output": "\n".join(output_parts),
-            "tools_used": tools_used,
-            "duration_ms": elapsed,
-        }
+        result["task_id"] = agent_id
+        result["duration_ms"] = elapsed
+        return result
 
     except Exception as e:
         logger.error(f"[TASK] Execution failed for agent {agent_id}: {e}")
@@ -1066,7 +1002,7 @@ async def execute_task(request: Request):
             "success": False,
             "task_id": agent_id,
             "output": None,
-            "tools_used": tools_used,
+            "tools_used": [],
             "duration_ms": int((_time.time() - t0) * 1000),
             "error": str(e),
         }
@@ -1090,6 +1026,182 @@ def _add_activity(msg, msg_type="info"):
     _poll_stats.setdefault("activity", []).insert(0, entry)
     if len(_poll_stats["activity"]) > 50:
         _poll_stats["activity"] = _poll_stats["activity"][:50]
+
+async def _llm_agent_execute(
+    goal: str,
+    agent_id: str,
+    available_tools: list,
+    user_id: str,
+    auth_hdrs: dict,
+    context: dict = None,
+    max_loops: int = 8,
+) -> dict:
+    """LLM-driven ReAct agent loop using ALL platform tools.
+
+    1. Fetch tool definitions from platform
+    2. Build OpenAI function-call schema for available tools
+    3. Send goal + tools to LLM, let it decide which to call
+    4. Execute tool calls via platform /tools/execute
+    5. Feed results back, loop until LLM produces final answer
+    """
+    import json as _json
+
+    tools_used = []
+
+    # Fetch full tool definitions from platform
+    platform_tools = await _fetch_platform_tools()
+    tool_map = {t["name"]: t for t in platform_tools}  # name -> {name, description, params}
+
+    # Build OpenAI function-call format for tools the agent has access to
+    openai_tools = []
+    for tname in available_tools:
+        tdef = tool_map.get(tname)
+        if not tdef:
+            continue
+        # Build JSON schema properties from params
+        props = {}
+        required = []
+        for p in tdef.get("params", []):
+            pname = p.get("name", "")
+            if not pname:
+                continue
+            ptype = p.get("type", "string")
+            ptype_map = {"string": "string", "integer": "integer", "number": "number",
+                         "boolean": "boolean", "array": "array", "object": "object"}
+            schema = {"type": ptype_map.get(str(ptype).lower(), "string"), "description": p.get("description", "")}
+            if p.get("enum"):
+                schema["enum"] = p["enum"]
+            props[pname] = schema
+            if p.get("required"):
+                required.append(pname)
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": tname,
+                "description": tdef.get("description", ""),
+                "parameters": {"type": "object", "properties": props, "required": required},
+            },
+        })
+
+    # System prompt
+    system_msg = (
+        "You are a federated AI agent running on the user's local machine via ResonantGenesis OpenClaw. "
+        "You have access to platform tools. Use them to accomplish the user's task. "
+        "Think step-by-step. Call tools as needed. When you have a complete answer, respond with your final text. "
+        "Always use memory_write to save important findings. Always use memory_read to check for relevant context first. "
+        "Format your final response in clean markdown."
+    )
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": goal},
+    ]
+
+    # ReAct loop
+    for loop_i in range(max_loops):
+        # Call LLM with tools
+        llm_body = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": messages,
+            "max_tokens": 4096,
+            "temperature": 0.3,
+        }
+        if openai_tools:
+            llm_body["tools"] = openai_tools
+            llm_body["tool_choice"] = "auto"
+
+        try:
+            llm_hdrs = {"Content-Type": "application/json"}
+            llm_hdrs.update(auth_hdrs)
+            async with httpx.AsyncClient(timeout=60.0) as lc:
+                llm_resp = await lc.post(
+                    f"{settings.LLM_SERVICE_URL}/chat/completions",
+                    json=llm_body,
+                    headers=llm_hdrs,
+                )
+            if llm_resp.status_code != 200:
+                logger.warning(f"[AGENT] LLM returned {llm_resp.status_code}: {llm_resp.text[:200]}")
+                break
+            llm_data = llm_resp.json()
+        except Exception as e:
+            logger.error(f"[AGENT] LLM request failed: {e}")
+            break
+
+        # Extract assistant message
+        choice = (llm_data.get("choices") or [{}])[0]
+        msg = choice.get("message", {})
+        finish = choice.get("finish_reason", "stop")
+
+        # If no tool calls, we have the final answer
+        tool_calls = msg.get("tool_calls", [])
+        if not tool_calls or finish == "stop":
+            final_text = msg.get("content", "")
+            if final_text:
+                # Save result to memory
+                if "memory_write" in available_tools:
+                    try:
+                        await _agent_engine_request(
+                            "POST", "tools/execute", user_id,
+                            json_body={"tool_name": "memory_write", "tool_input": {
+                                "content": f"Task: {goal}\nResult: {final_text[:500]}",
+                                "tags": ["task_result", "openclaw"],
+                            }},
+                            timeout=10.0,
+                        )
+                        if "memory_write" not in tools_used:
+                            tools_used.append("memory_write")
+                    except Exception:
+                        pass
+                return {"success": True, "output": final_text, "tools_used": tools_used}
+            break
+
+        # Process tool calls
+        messages.append(msg)  # assistant message with tool_calls
+
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            try:
+                tool_args = _json.loads(fn.get("arguments", "{}"))
+            except Exception:
+                tool_args = {}
+
+            tc_id = tc.get("id", f"call_{loop_i}")
+            logger.info(f"[AGENT] Loop {loop_i+1}: calling {tool_name}({list(tool_args.keys())})")
+            _add_activity(f'<span class="tool">{tool_name}</span>({", ".join(f"{k}=" for k in tool_args)})', 'info')
+
+            # Execute via platform
+            try:
+                tool_result = await _agent_engine_request(
+                    "POST", "tools/execute", user_id,
+                    json_body={"tool_name": tool_name, "tool_input": tool_args},
+                    timeout=30.0,
+                )
+                result_text = ""
+                if tool_result.get("success"):
+                    if tool_name not in tools_used:
+                        tools_used.append(tool_name)
+                    r = tool_result.get("result", tool_result.get("output", ""))
+                    result_text = _json.dumps(r, default=str)[:3000] if isinstance(r, (dict, list)) else str(r)[:3000]
+                else:
+                    result_text = f"Error: {tool_result.get('error', 'unknown')}"
+            except Exception as e:
+                result_text = f"Tool execution error: {e}"
+
+            messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_text})
+
+    # If we exhausted loops without a final answer, compile what we have
+    last_content = ""
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and m.get("content"):
+            last_content = m["content"]
+            break
+    return {
+        "success": bool(last_content or tools_used),
+        "output": last_content or f"Agent used {len(tools_used)} tools but did not produce a final summary.",
+        "tools_used": tools_used,
+    }
+
 
 async def _poll_federation_tasks():
     """Background loop: poll the platform for pending federated tasks."""
@@ -1148,75 +1260,23 @@ async def _poll_federation_tasks():
             _poll_stats["tasks_picked"] = _poll_stats.get("tasks_picked", 0) + 1
             _add_activity(f'<span class="tool">Task picked up:</span> {goal[:60]}...', 'info')
 
-            # Execute using our existing task execution logic
+            # Execute using LLM-driven ReAct agent loop
             import time as _time
             t0 = _time.time()
             tools_used = []
-            output_parts = []
 
             try:
-                # Web search — always search when web_search is available (most tasks benefit)
-                if "web_search" in tools:
-                    search_result = await _agent_engine_request(
-                        "POST", "tools/execute", user_id,
-                        json_body={"tool_name": "web_search", "tool_input": {"query": goal}},
-                        timeout=30.0,
-                    )
-                    if search_result.get("success"):
-                        tools_used.append("web_search")
-                        results = search_result.get("result", {}).get("results", [])
-                        if results:
-                            output_parts.append("**Search Results:**")
-                            for r in results[:5]:
-                                output_parts.append(f"- [{r.get('title', 'Untitled')}]({r.get('url', '')})")
-
-                # Memory read
-                if "memory_read" in tools:
-                    try:
-                        mem_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
-                        mem_hdrs.update(auth_hdrs)
-                        async with httpx.AsyncClient(timeout=10.0) as mc:
-                            mem_resp = await mc.post(
-                                f"{settings.MEMORY_SERVICE_URL}/search",
-                                json={"query": goal, "limit": 3},
-                                headers=mem_hdrs,
-                            )
-                        if mem_resp.status_code == 200:
-                            mem_data = mem_resp.json()
-                            memories = mem_data.get("results", mem_data.get("memories", []))
-                            if memories:
-                                tools_used.append("memory_read")
-                                output_parts.append("\n**Relevant Memories:**")
-                                for m in memories[:3]:
-                                    output_parts.append(f"- {m.get('content', '')[:200]}")
-                    except Exception:
-                        pass
-
-                # Memory write
-                if "memory_write" in tools and output_parts:
-                    try:
-                        mem_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
-                        mem_hdrs.update(auth_hdrs)
-                        async with httpx.AsyncClient(timeout=10.0) as mc:
-                            await mc.post(
-                                f"{settings.MEMORY_SERVICE_URL}/ingest",
-                                json={"content": f"Task: {goal}\nResult: {chr(10).join(output_parts[:5])}", "memory_type": "task_result"},
-                                headers=mem_hdrs,
-                            )
-                        tools_used.append("memory_write")
-                    except Exception:
-                        pass
-
-                if not output_parts:
-                    output_parts.append(f"Task completed: '{goal}'")
-
+                result_body = await _llm_agent_execute(
+                    goal=goal,
+                    agent_id=agent_id,
+                    available_tools=tools,
+                    user_id=user_id,
+                    auth_hdrs=auth_hdrs,
+                    context=context,
+                )
+                tools_used = result_body.get("tools_used", [])
                 elapsed = int((_time.time() - t0) * 1000)
-                result_body = {
-                    "success": True,
-                    "output": "\n".join(output_parts),
-                    "tools_used": tools_used,
-                    "duration_ms": elapsed,
-                }
+                result_body["duration_ms"] = elapsed
 
             except Exception as e:
                 elapsed = int((_time.time() - t0) * 1000)
