@@ -9,7 +9,7 @@
 
 The OpenClaw connector is a **federated agent bridge** that connects your local OpenClaw agent to the ResonantGenesis platform. Your agent runs on **your hardware** with your LLM, but gains full access to platform tools — web search, code analysis, persistent memory, blockchain identity, media generation, and 560+ REST APIs across 42 microservices.
 
-**Federated means**: Your agent is registered on the platform with `agent_source='federated'`. You can run it from the platform's Agents page (dev-swat.com/agents), and the platform dispatches tasks to your local machine. Your compute, your data, your control.
+**Federated means**: Your agent is registered on the platform with `agent_source='federated'`. You can create it from the platform UI (dev-swat.com/agents → + Create → ⚡ Federated) or from the local connector. When you click "Run", the platform queues the task — your local connector **polls** for it every 5 seconds (outbound HTTPS only, zero inbound connections). Your compute, your data, your control.
 
 ## Full Tool Catalog
 
@@ -393,12 +393,58 @@ curl -X POST http://localhost:8000/memory/query \
 ```
 Platform UI (dev-swat.com/agents)
   → User clicks "Run" on federated agent
-  → Agent Engine checks agent_source == 'federated'
-  → Agent Engine POSTs task to your connector at localhost:8000/task/execute
-  → Your connector executes using web_search, memory_read, memory_write
-  → Results returned to Agent Engine → displayed in platform UI
+  → Agent Engine queues task in federated_tasks table (status: pending)
+  → Your local connector polls GET /federation/tasks/poll every 5 seconds
+  → Connector picks up the task (status → dispatched)
+  → Connector executes using web_search, memory_read, memory_write
+  → Connector submits result via POST /federation/tasks/{id}/result
+  → Agent Engine updates session → displayed in platform UI
   → Session shows: status=completed, tools_used, duration_ms
 ```
+
+**Security**: ALL traffic is outbound HTTPS from your machine. The platform never connects to you — your connector pulls tasks. Works behind any firewall, NAT, or VPN.
+
+### Two ways to create a federated agent
+
+**Option A: From the platform UI (easiest)**
+1. Go to dev-swat.com/agents → click **+ Create**
+2. Fill in name/description → click **Next**
+3. On the Type step, click **⚡ Federated (Local)**
+4. Pick provider/model/tools → **Create**
+5. Agent appears on your Agents page with `agent_source='federated'`
+
+**Option B: From the local connector (CLI)**
+```bash
+curl -X POST http://localhost:8000/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-agent", "tools": ["web_search", "memory_read", "memory_write"]}'
+```
+
+### Mode toggle (governed / unbounded)
+
+Federated agents default to **unbounded** (no approval gates, 200 max steps, 500K max tokens). You can toggle anytime:
+
+```bash
+# Switch to governed (25 steps max, approval gates)
+curl -X PATCH https://dev-swat.com/api/v1/agents/AGENT_ID/mode \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "governed"}'
+
+# Switch back to unbounded
+curl -X PATCH https://dev-swat.com/api/v1/agents/AGENT_ID/mode \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "unbounded"}'
+```
+
+| | Governed | Unbounded |
+|---|---|---|
+| Safety gate | Every step checked | No checks |
+| Max steps | 25 | 200 |
+| Max tokens | 50,000 | 500,000 |
+| Rate limit | 30/min | 120/min |
+| Best for | Shared agents, production | Your own agents, local dev |
 
 JWT is stored at `~/.openclaw/tokens.json` (chmod 600). Tokens auto-refresh — no manual re-authentication.
 
@@ -452,16 +498,18 @@ Your Machine (localhost:8000)          ResonantGenesis Platform (HTTPS)
 │  OpenClaw Connector     │  ──────►  │  HTTPS Gateway       │ ← TLS termination
 │  (this repo)            │  HTTPS    │  (dev-swat.com:443)  │   JWT validation
 │                         │  JWT auth │                      │   Rate limiting
-│  /auth/login            │  ◄──────  │  Dispatches tasks    │
-│  /auth/status           │  task     │  to your connector   │
-│  /skills/available      │  dispatch │  when you click Run  │
-│  /skills/execute        │           └──────────┬───────────┘
-│  /agents/register       │                      │
-│  /agents/heartbeat      │           ┌──────────▼───────────┐
-│  /memory/ingest         │           │  Agent Engine         │
-│  /memory/query          │           │  162 tools, 560+ APIs │
-│  /task/execute ◄────────│───────────│  Federated dispatch   │
-│                         │           └──────────┬───────────┘
+│  /auth/login            │           └──────────┬───────────┘
+│  /auth/status           │                      │
+│  /skills/available      │           ┌──────────▼───────────┐
+│  /skills/execute        │           │  Agent Engine         │
+│  /agents/register       │           │  162 tools, 560+ APIs │
+│  /agents/heartbeat      │           │  federated_tasks queue│
+│  /memory/ingest         │           └──────────┬───────────┘
+│  /memory/query          │                      │
+│  Background polling ────│───PULL───►│  GET /federation/     │
+│  (every 5 seconds)      │           │    tasks/poll         │
+│  POST /federation/      │───PUSH───►│  POST /federation/    │
+│    tasks/{id}/result    │           │    tasks/{id}/result  │
 └─────────────────────────┘                      │
                                       ┌──────────▼───────────┐
 Your LLM (Ollama, Groq, etc.)        │  42 Microservices     │
@@ -470,24 +518,28 @@ Your hardware, your data              │  Memory, Blockchain,  │
                                       └──────────────────────┘
 ```
 
-### Two-Way Traffic
+### Outbound-Only Traffic (Polling)
 
-- **Outbound (You → Platform)**: Your connector calls platform tools via HTTPS. `POST /skills/execute` → gateway → agent engine → tool result → back to you.
-- **Inbound (Platform → You)**: When you click "Run" on your federated agent at dev-swat.com/agents, the platform sends the task to `localhost:8000/task/execute`. Your connector runs it locally using platform tools and returns results.
+**ALL traffic is outbound from your machine. The platform NEVER connects to you.**
 
-> **Security**: All outbound traffic is JWT-authenticated HTTPS. Inbound task dispatch only works when your connector is running locally — the platform can't reach you unless you're online.
+- **Tool calls (You → Platform)**: `POST /skills/execute` → gateway → agent engine → result
+- **Task polling (You → Platform)**: Every 5s, `GET /federation/tasks/poll` → returns pending task or null
+- **Result submission (You → Platform)**: `POST /federation/tasks/{id}/result` → updates session in UI
+
+> **Security**: Zero inbound connections. Works behind any firewall, NAT, VPN. JWT-authenticated HTTPS only. No tunnels (ngrok/cloudflare) needed. No ports exposed.
 
 ### How It Works
 
-1. **Start connector**: `uvicorn app.main:app --port 8000 --reload` — connector runs locally
+1. **Start connector**: `uvicorn app.main:app --port 8000 --reload` — starts connector + background polling
 2. **Authenticate**: `POST /auth/login` with your dev-swat.com credentials — JWT stored at `~/.openclaw/tokens.json`
-3. **Register agent**: `POST /agents/register` — creates a federated agent on the platform with `agent_source='federated'`, your tools, hardware info, and connection URL
-4. **Discover tools**: `GET /skills/available` — returns all 162 platform tools
-5. **Execute tools**: `POST /skills/execute` with `{skill_name, parameters}` — routed through the gateway
-6. **Run from platform**: Click "Run" on your agent at dev-swat.com/agents — platform dispatches task to your connector, which executes using web_search + memory
-7. **Heartbeat**: Periodic `POST /agents/heartbeat` keeps your agent status "online" on the platform
-8. **Memory**: `POST /memory/ingest` and `POST /memory/query` — persistent Hash Sphere memory across sessions
-9. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
+3. **Create agent**: Either from platform UI (+ Create → ⚡ Federated) or locally (`POST /agents/register`)
+4. **Polling starts**: Connector polls `GET /federation/tasks/poll` every 5 seconds automatically
+5. **Run from platform**: Click "Run" on your agent at dev-swat.com/agents → task queued → connector picks it up
+6. **Execution**: Connector uses web_search, memory_read, memory_write to fulfill the task
+7. **Result submitted**: `POST /federation/tasks/{id}/result` → session updates in platform UI
+8. **Memory**: `POST /memory/ingest` and `POST /memory/query` — persistent Hash Sphere memory
+9. **Mode toggle**: `PATCH /{agent_id}/mode` — switch between governed (safe) and unbounded (fast)
+10. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
 
 ---
 
