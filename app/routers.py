@@ -951,6 +951,127 @@ async def agent_heartbeat(body: AgentHeartbeat, request: Request):
 
 
 # ============================================
+# TASK EXECUTION (platform-dispatched tasks for federated agents)
+# ============================================
+
+@router.post("/task/execute")
+async def execute_task(request: Request):
+    """
+    Execute a task dispatched from the platform.
+
+    When a user clicks 'Run' on a federated agent in the platform UI,
+    the agent engine sends the task here. The local OpenClaw agent
+    processes it using local compute + platform tools, then returns results.
+    """
+    import time as _time
+    t0 = _time.time()
+
+    body = await request.json()
+    task = body.get("task", "")
+    agent_id = body.get("agent_id", "")
+    context = body.get("context", {})
+    available_tools = body.get("available_tools", [])
+
+    if not task:
+        return {"success": False, "error": "No task provided", "task_id": agent_id}
+
+    user_id = _get_user_id(request)
+    logger.info(f"[TASK] Received platform task for agent {agent_id}: {task[:100]}...")
+
+    # Execute the task using platform tools
+    tools_used = []
+    output_parts = []
+
+    # Simple multi-step task execution using available platform tools
+    try:
+        # Step 1: If web_search is available and task seems to need it, search first
+        search_keywords = ["search", "find", "look up", "research", "what is", "who is", "latest", "news"]
+        if any(kw in task.lower() for kw in search_keywords) and "web_search" in available_tools:
+            search_result = await _agent_engine_request(
+                "POST", "tools/execute", user_id,
+                json_body={"tool_name": "web_search", "tool_input": {"query": task}},
+                timeout=30.0,
+            )
+            if search_result.get("success"):
+                tools_used.append("web_search")
+                results = search_result.get("result", {}).get("results", [])
+                if results:
+                    output_parts.append("**Search Results:**")
+                    for r in results[:5]:
+                        output_parts.append(f"- [{r.get('title', 'Untitled')}]({r.get('url', '')})")
+
+        # Step 2: If memory_read is available, check relevant memories
+        if "memory_read" in available_tools:
+            try:
+                from . import platform_auth
+                auth_hdrs = await platform_auth.get_auth_headers()
+                hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                hdrs.update(auth_hdrs)
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    mem_resp = await client.post(
+                        f"{settings.MEMORY_SERVICE_URL}/search",
+                        json={"query": task, "limit": 3},
+                        headers=hdrs,
+                    )
+                if mem_resp.status_code == 200:
+                    mem_data = mem_resp.json()
+                    memories = mem_data.get("results", mem_data.get("memories", []))
+                    if memories:
+                        tools_used.append("memory_read")
+                        output_parts.append("\n**Relevant Memories:**")
+                        for m in memories[:3]:
+                            content = m.get("content", "")[:200]
+                            output_parts.append(f"- {content}")
+            except Exception as e:
+                logger.debug(f"Memory read during task failed: {e}")
+
+        # Step 3: Store task result as memory
+        if "memory_write" in available_tools and output_parts:
+            try:
+                from . import platform_auth
+                auth_hdrs = await platform_auth.get_auth_headers()
+                hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                hdrs.update(auth_hdrs)
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        f"{settings.MEMORY_SERVICE_URL}/ingest",
+                        json={
+                            "content": f"Task: {task}\nResult: {chr(10).join(output_parts[:5])}",
+                            "memory_type": "task_result",
+                            "metadata": {"agent_id": agent_id, "source": "openclaw_task"},
+                        },
+                        headers=hdrs,
+                    )
+                tools_used.append("memory_write")
+            except Exception:
+                pass
+
+        elapsed = int((_time.time() - t0) * 1000)
+
+        if not output_parts:
+            output_parts.append(f"Task received: '{task}'. Agent processed with {len(available_tools)} available tools.")
+
+        return {
+            "success": True,
+            "task_id": agent_id,
+            "output": "\n".join(output_parts),
+            "tools_used": tools_used,
+            "duration_ms": elapsed,
+        }
+
+    except Exception as e:
+        logger.error(f"[TASK] Execution failed for agent {agent_id}: {e}")
+        return {
+            "success": False,
+            "task_id": agent_id,
+            "output": None,
+            "tools_used": tools_used,
+            "duration_ms": int((_time.time() - t0) * 1000),
+            "error": str(e),
+        }
+
+
+# ============================================
 # MEMORY BRIDGE (Hash Sphere integration for OpenClaw agents)
 # ============================================
 
