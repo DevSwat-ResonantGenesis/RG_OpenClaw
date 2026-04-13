@@ -1,13 +1,15 @@
-# RG OpenClaw — Platform Connector for OpenClaw Agents
+# RG OpenClaw — Federated Agent Connector
 
-> **Part of the [ResonantGenesis](https://dev-swat.com) platform** — Connect your local OpenClaw agent to 162 platform tools, 560+ APIs, persistent memory, and a decentralized identity.
+> **Part of the [ResonantGenesis](https://dev-swat.com) platform** — Run agents on YOUR hardware. Access 162 platform tools, 560+ APIs, persistent memory, blockchain identity, and execute tasks from the platform UI.
 
 [![Status: Production](https://img.shields.io/badge/Status-Production-brightgreen.svg)]()
 [![Tools: 162](https://img.shields.io/badge/Platform_Tools-162-blue.svg)]()
 [![APIs: 560+](https://img.shields.io/badge/Platform_APIs-560+-purple.svg)]()
 [![License: RG Source Available](https://img.shields.io/badge/License-RG%20Source%20Available-blue.svg)](LICENSE.txt)
 
-The OpenClaw connector is a lightweight bridge service that connects your local [OpenClaw](https://github.com/anthropics/anthropic-cookbook) agent (pi-agent-core) to the full ResonantGenesis platform. Your agent runs on **your hardware**, but gains access to everything the platform offers — web search, code analysis, persistent memory, blockchain identity, media generation, integrations, and 560+ REST APIs across 42 microservices.
+The OpenClaw connector is a **federated agent bridge** that connects your local OpenClaw agent to the ResonantGenesis platform. Your agent runs on **your hardware** with your LLM, but gains full access to platform tools — web search, code analysis, persistent memory, blockchain identity, media generation, and 560+ REST APIs across 42 microservices.
+
+**Federated means**: Your agent is registered on the platform with `agent_source='federated'`. You can run it from the platform's Agents page (dev-swat.com/agents), and the platform dispatches tasks to your local machine. Your compute, your data, your control.
 
 ## Full Tool Catalog
 
@@ -300,7 +302,6 @@ Agent needs a tool that doesn't exist
 - **Python 3.9+** (3.11+ recommended)
 - **pip** package manager
 - **Free account** at [dev-swat.com](https://dev-swat.com) (required for authentication)
-- **OpenClaw runtime** (pi-agent-core) installed on your machine
 
 ### Installation
 
@@ -318,48 +319,85 @@ cp .env.example .env
 uvicorn app.main:app --port 8000 --reload
 ```
 
+Open http://localhost:8000 in your browser — you should see the connector status page.
+
 ### Full Tested A-to-Z Flow
 
-Every command below has been tested end-to-end against the production platform (dev-swat.com).
+Every command below has been tested end-to-end against the production platform (dev-swat.com) on April 13, 2026.
 
 ```bash
-# ── Step 1: Authenticate ──────────────────────────────────────────
+# ── Step 1: Check connector is running ────────────────────────────
+curl http://localhost:8000/
+# → {"service": "RG_OpenClaw Connector", "status": "running", "authenticated": false, ...}
+
+# ── Step 2: Authenticate with your dev-swat.com account ──────────
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "your-password"}'
-# → {"success": true, "user_id": "d85c1fd7-...", "expires_in": 3600}
+# → {"success": true, "user_id": "d85c1fd7-...", "email": "you@example.com", "expires_in": 86400}
 
-# ── Step 2: Verify auth ──────────────────────────────────────────
+# ── Step 3: Verify authentication ────────────────────────────────
 curl http://localhost:8000/auth/status
-# → {"authenticated": true, "token_expired": false, "token_ttl_seconds": 86185}
+# → {"authenticated": true, "token_expired": false, "token_ttl_seconds": 86185, "email": "you@example.com"}
 
-# ── Step 3: Discover tools ───────────────────────────────────────
+# ── Step 4: Discover platform tools ──────────────────────────────
 curl http://localhost:8000/skills/available | python3 -m json.tool
-# → {"platform_skills": [...], "total": 161}
+# → {"platform_skills": [...162 tools...], "total": 162}
 
-# ── Step 4: Register your agent ──────────────────────────────────
+# ── Step 5: Register a federated agent ───────────────────────────
+# This creates your agent on the platform with agent_source='federated'
+# and stores your hardware info, tools, and connection URL.
 curl -X POST http://localhost:8000/agents/register \
   -H "Content-Type: application/json" \
-  -d '{"name": "my-openclaw-agent", "agent_type": "openclaw", "description": "My local agent"}'
-# → {"agent_id": "32e8a65f-...", "dsid": "dsid:v1:agent:7cf7feb1...", "status": "registered"}
+  -d '{
+    "name": "my-openclaw-agent",
+    "description": "Federated agent on my local machine",
+    "tools": ["web_search", "memory_read", "memory_write", "fetch_url", "deep_research"],
+    "hardware": {"os": "macOS", "arch": "arm64"}
+  }'
+# → {"agent_id": "4c4466c7-...", "name": "my-openclaw-agent", "agent_source": "openclaw", "status": "registered"}
 
-# ── Step 5: Execute a skill ──────────────────────────────────────
+# ── Step 6: Execute a platform tool ──────────────────────────────
 curl -X POST http://localhost:8000/skills/execute \
   -H "Content-Type: application/json" \
-  -d '{"skill_name": "web_search", "parameters": {"query": "OpenClaw AI"}, "agent_id": "YOUR_AGENT_ID"}'
-# → {"success": true, "result": {"results": [{"title": "...", "url": "..."}]}}
+  -d '{"skill_name": "web_search", "parameters": {"query": "latest AI agent frameworks 2026"}}'
+# → {"success": true, "result": {"results": [{"title": "Top 7 AI Agent Frameworks...", "url": "..."}]}}
 
-# ── Step 6: Send heartbeat ───────────────────────────────────────
+# ── Step 7: Send heartbeat ───────────────────────────────────────
 curl -X POST http://localhost:8000/agents/heartbeat \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "YOUR_AGENT_ID", "status": "online"}'
 # → {"acknowledged": true, "pending_tasks": []}
 
-# ── Step 7: Write memory to Hash Sphere ──────────────────────────
+# ── Step 8: Write memory to Hash Sphere ──────────────────────────
 curl -X POST http://localhost:8000/memory/ingest \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "YOUR_AGENT_ID", "content": "First memory from my OpenClaw agent"}'
 # → {"success": true, "data": {"id": "ee8f1d6d-...", "hash": "242c26...", "resonance_score": 1.69}}
+
+# ── Step 9: Query memories ───────────────────────────────────────
+curl -X POST http://localhost:8000/memory/query \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "YOUR_AGENT_ID", "query": "openclaw agent", "limit": 5}'
+# → {"results": [{"content": "First memory from my OpenClaw agent", ...}]}
+
+# ── Step 10: Run agent from platform UI ──────────────────────────
+# Go to https://dev-swat.com/agents → find your agent → click Run
+# The platform dispatches the task to your local connector.
+# Your connector uses web_search, memory_read, memory_write to complete it.
+# Results appear in the platform's session viewer with tools_used and duration.
+```
+
+### What happens when you Run from the platform
+
+```
+Platform UI (dev-swat.com/agents)
+  → User clicks "Run" on federated agent
+  → Agent Engine checks agent_source == 'federated'
+  → Agent Engine POSTs task to your connector at localhost:8000/task/execute
+  → Your connector executes using web_search, memory_read, memory_write
+  → Results returned to Agent Engine → displayed in platform UI
+  → Session shows: status=completed, tools_used, duration_ms
 ```
 
 JWT is stored at `~/.openclaw/tokens.json` (chmod 600). Tokens auto-refresh — no manual re-authentication.
@@ -407,55 +445,49 @@ OPENCLAW_SERVICE_ENABLED=true
 ## Architecture
 
 ```
-Your Machine                          ResonantGenesis Platform (HTTPS only)
-─────────────                         ─────────────────────────────────────
-                                      
-┌──────────────┐                     ┌──────────────────────┐
-│  OpenClaw    │                     │  HTTPS Gateway       │ ← TLS termination
-│  Agent       │  JWT-authenticated  │  (dev-swat.com:443)  │   CORS lockdown
-│  (pi-agent)  │  HTTPS REST         │  JWT validation      │   Rate limiting
-└──────┬───────┘ ─────────────────►  └──────────┬───────────┘
-       │                                        │ internal network
-       │  localhost:8000              ┌──────────▼───────────┐
-       │  (your machine only)         │  OpenClaw Service    │ ← zero ports exposed
-┌──────▼───────┐                     │  (openclaw_service)  │   internal only
-│  Connector   │                     └──────────┬───────────┘
-│  (this repo) │                                │
-│              │                     ┌──────────▼───────────┐
-│  /auth/login │                     │  Agent Engine         │
-│  /skills/*   │                     │  (162 tools)          │
-│  /agents/*   │                     │  (560+ APIs)          │
-│  /memory/*   │                     └──────────┬───────────┘
-└──────────────┘                                │
-                                     ┌──────────▼───────────┐
-                                     │  Platform Services    │
-                                     │  42 microservices     │
-                                     └──────────────────────┘
+Your Machine (localhost:8000)          ResonantGenesis Platform (HTTPS)
+────────────────────────────           ──────────────────────────────────
+
+┌─────────────────────────┐           ┌──────────────────────┐
+│  OpenClaw Connector     │  ──────►  │  HTTPS Gateway       │ ← TLS termination
+│  (this repo)            │  HTTPS    │  (dev-swat.com:443)  │   JWT validation
+│                         │  JWT auth │                      │   Rate limiting
+│  /auth/login            │  ◄──────  │  Dispatches tasks    │
+│  /auth/status           │  task     │  to your connector   │
+│  /skills/available      │  dispatch │  when you click Run  │
+│  /skills/execute        │           └──────────┬───────────┘
+│  /agents/register       │                      │
+│  /agents/heartbeat      │           ┌──────────▼───────────┐
+│  /memory/ingest         │           │  Agent Engine         │
+│  /memory/query          │           │  162 tools, 560+ APIs │
+│  /task/execute ◄────────│───────────│  Federated dispatch   │
+│                         │           └──────────┬───────────┘
+└─────────────────────────┘                      │
+                                      ┌──────────▼───────────┐
+Your LLM (Ollama, Groq, etc.)        │  42 Microservices     │
+Your hardware, your data              │  Memory, Blockchain,  │
+                                      │  Storage, LLM, etc.   │
+                                      └──────────────────────┘
 ```
 
-> **Security**: Zero ports exposed to the internet. All traffic routes through the platform's existing HTTPS gateway with full JWT authentication, CORS lockdown, and rate limiting.
+### Two-Way Traffic
+
+- **Outbound (You → Platform)**: Your connector calls platform tools via HTTPS. `POST /skills/execute` → gateway → agent engine → tool result → back to you.
+- **Inbound (Platform → You)**: When you click "Run" on your federated agent at dev-swat.com/agents, the platform sends the task to `localhost:8000/task/execute`. Your connector runs it locally using platform tools and returns results.
+
+> **Security**: All outbound traffic is JWT-authenticated HTTPS. Inbound task dispatch only works when your connector is running locally — the platform can't reach you unless you're online.
 
 ### How It Works
 
-1. **Authenticate locally**: `POST /auth/login` with your dev-swat.com credentials — JWT stored at `~/.openclaw/tokens.json`
-2. **Tool discovery**: Call `GET /skills/available` — returns all 162 platform tools with descriptions
-3. **Tool execution**: Call `POST /skills/execute` with `{skill_name, parameters}` — routed through the secure gateway to the platform's tool execution engine
-4. **Agent registration**: `POST /agents/register` creates your agent on the platform with DSID identity + RARA governance
-5. **Heartbeat**: Your agent sends periodic heartbeats so the platform knows it's online
-6. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
-
-### Wire Protocol (WebSocket RPC)
-
-```json
-// Request (Agent → Platform)
-{"type": "req", "id": "uuid", "method": "tool_call", "params": {"tool_name": "web_search", "tool_input": {"query": "latest AI papers"}}}
-
-// Response (Platform → Agent)
-{"type": "res", "id": "uuid", "ok": true, "payload": {"results": [...]}}
-
-// Event (Platform → Agent)
-{"type": "event", "event": "task:assigned", "payload": {"task_id": "...", "goal": "..."}}
-```
+1. **Start connector**: `uvicorn app.main:app --port 8000 --reload` — connector runs locally
+2. **Authenticate**: `POST /auth/login` with your dev-swat.com credentials — JWT stored at `~/.openclaw/tokens.json`
+3. **Register agent**: `POST /agents/register` — creates a federated agent on the platform with `agent_source='federated'`, your tools, hardware info, and connection URL
+4. **Discover tools**: `GET /skills/available` — returns all 162 platform tools
+5. **Execute tools**: `POST /skills/execute` with `{skill_name, parameters}` — routed through the gateway
+6. **Run from platform**: Click "Run" on your agent at dev-swat.com/agents — platform dispatches task to your connector, which executes using web_search + memory
+7. **Heartbeat**: Periodic `POST /agents/heartbeat` keeps your agent status "online" on the platform
+8. **Memory**: `POST /memory/ingest` and `POST /memory/query` — persistent Hash Sphere memory across sessions
+9. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
 
 ---
 
@@ -505,38 +537,71 @@ Content-Type: application/json
 
 ### Agent Registration
 
-#### Register an OpenClaw Agent
+#### Register a Federated Agent
 ```http
 POST /agents/register
 Content-Type: application/json
 
 {
-  "name": "My Research Agent",
-  "description": "Autonomous research agent with web access",
-  "model": "llama3",
-  "provider": "local",
-  "tools": ["web_search", "memory.write", "generate_image"],
-  "mode": "governed",
-  "memory_mode": "cloud",
-  "enable_rara": true,
-  "enable_dsid": true
+  "name": "my-research-agent",
+  "description": "Federated agent with web search and memory",
+  "tools": ["web_search", "memory_read", "memory_write", "fetch_url", "deep_research"],
+  "hardware": {"os": "macOS", "arch": "arm64"}
 }
 ```
 
 **Response:**
 ```json
 {
-  "agent_id": "uuid",
-  "name": "My Research Agent",
+  "agent_id": "4c4466c7-429c-4068-9208-87c1d08f2d0f",
+  "name": "my-research-agent",
   "agent_source": "openclaw",
-  "dsid": "sha256-hash",
-  "webhook_url": "https://dev-swat.com/openclaw/relay/...",
-  "webhook_secret": "hmac-secret",
-  "memory_mode": "cloud",
-  "rara_enrolled": true,
+  "agent_public_hash": "9a8b0628018a0e76...",
+  "agent_crypto_hash": "9a8b0628018a0e76...",
   "status": "registered"
 }
 ```
+
+**What this does on the platform:**
+- Creates agent with `agent_source='federated'` (visible on Agents page)
+- Stores `openclaw_config` with your `connection_url`, `hardware_info`, `capabilities`
+- Assigns platform tools to the agent
+- Anchors agent identity on the blockchain (DSID)
+- Agent appears at dev-swat.com/agents with a "Federated" badge
+
+### Task Execution (Platform → Local)
+
+When you click "Run" on a federated agent in the platform UI, the Agent Engine dispatches the task to your local connector:
+
+#### Execute a Task Locally
+```http
+POST /task/execute
+Content-Type: application/json
+
+{
+  "task": "Search for upcoming AI events in San Francisco this week",
+  "agent_id": "4c4466c7-...",
+  "available_tools": ["web_search", "memory_read", "memory_write"],
+  "context": {"user_id": "d85c1fd7-..."}
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "task_id": "4c4466c7-...",
+  "output": "**Search Results:**\n- [AI Summit SF 2026](https://...)...\n\n**Relevant Memories:**\n- ...",
+  "tools_used": ["web_search", "memory_read", "memory_write"],
+  "duration_ms": 6491
+}
+```
+
+The connector automatically:
+1. Searches the web if the task mentions search-related keywords
+2. Reads relevant memories from Hash Sphere
+3. Stores the task result as a new memory
+4. Returns structured output with tools_used and timing
 
 ### Memory Bridge
 
@@ -677,17 +742,35 @@ Your Agent: "Store this memory"
 RG_OpenClaw/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py           # FastAPI app entry point
-│   ├── config.py          # Environment configuration (Pydantic Settings)
-│   ├── models.py          # All request/response Pydantic models
-│   ├── platform_auth.py   # JWT auth — login, token storage, auto-refresh
-│   └── routers.py         # All REST endpoints (auth, connections, skills, memory, governance)
-├── Dockerfile            # Production container (python:3.11-slim)
-├── requirements.txt      # FastAPI, httpx, pydantic, python-jose
-├── .env.example          # Example environment configuration
+│   ├── main.py            # FastAPI app + root status page + startup/shutdown
+│   ├── config.py           # Environment config (Pydantic Settings, all service URLs)
+│   ├── models.py           # Request/response Pydantic models (agent register, heartbeat, memory, etc.)
+│   ├── platform_auth.py    # JWT auth — login, token storage at ~/.openclaw/tokens.json, auto-refresh
+│   └── routers.py          # All endpoints: auth, skills, agents, memory, governance, task/execute
+├── Dockerfile             # Production container (python:3.11-slim)
+├── requirements.txt       # FastAPI, httpx, pydantic, python-jose, cryptography
+├── .env.example           # Example config (defaults work out of the box)
 ├── LICENSE.txt
-└── README.md             # This file
+└── README.md              # This file
 ```
+
+### Key Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Connector status dashboard |
+| `GET` | `/health` | Health check |
+| `POST` | `/auth/login` | Authenticate with dev-swat.com credentials |
+| `GET` | `/auth/status` | Check auth status (no network call) |
+| `GET` | `/skills/available` | List all 162 platform tools |
+| `POST` | `/skills/execute` | Execute a platform tool by name |
+| `POST` | `/agents/register` | Register a federated agent on the platform |
+| `POST` | `/agents/heartbeat` | Send agent heartbeat (keeps status "online") |
+| `POST` | `/memory/ingest` | Store memory in Hash Sphere |
+| `POST` | `/memory/query` | Query memories from Hash Sphere |
+| `POST` | `/task/execute` | Receive and execute platform-dispatched tasks |
+| `GET` | `/manifest` | Agent manifest for marketplace |
+| `GET` | `/setup-guide` | Setup instructions |
 
 ---
 
