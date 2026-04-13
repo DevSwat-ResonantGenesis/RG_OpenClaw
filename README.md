@@ -305,38 +305,64 @@ Agent needs a tool that doesn't exist
 ### Installation
 
 ```bash
-# 1. Clone the repo
+# 1. Clone and set up
 git clone https://github.com/DevSwat-ResonantGenesis/RG_OpenClaw.git
 cd RG_OpenClaw
-
-# 2. Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Configure environment
+# 2. Config (defaults work out of the box — no editing needed)
 cp .env.example .env
-nano .env  # Set your platform credentials (see Configuration below)
 
-# 5. Start the connector
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 3. Start the connector
+uvicorn app.main:app --port 8000 --reload
 ```
 
-The connector is now running at `http://localhost:8000`.
+### Full Tested A-to-Z Flow
+
+Every command below has been tested end-to-end against the production platform (dev-swat.com).
 
 ```bash
-# 6. Authenticate with the platform (same credentials as dev-swat.com)
+# ── Step 1: Authenticate ──────────────────────────────────────────
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "your-password"}'
+# → {"success": true, "user_id": "d85c1fd7-...", "expires_in": 3600}
 
-# 7. Verify authentication
+# ── Step 2: Verify auth ──────────────────────────────────────────
 curl http://localhost:8000/auth/status
+# → {"authenticated": true, "token_expired": false, "token_ttl_seconds": 86185}
+
+# ── Step 3: Discover tools ───────────────────────────────────────
+curl http://localhost:8000/skills/available | python3 -m json.tool
+# → {"platform_skills": [...], "total": 161}
+
+# ── Step 4: Register your agent ──────────────────────────────────
+curl -X POST http://localhost:8000/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-openclaw-agent", "agent_type": "openclaw", "description": "My local agent"}'
+# → {"agent_id": "32e8a65f-...", "dsid": "dsid:v1:agent:7cf7feb1...", "status": "registered"}
+
+# ── Step 5: Execute a skill ──────────────────────────────────────
+curl -X POST http://localhost:8000/skills/execute \
+  -H "Content-Type: application/json" \
+  -d '{"skill_name": "web_search", "parameters": {"query": "OpenClaw AI"}, "agent_id": "YOUR_AGENT_ID"}'
+# → {"success": true, "result": {"results": [{"title": "...", "url": "..."}]}}
+
+# ── Step 6: Send heartbeat ───────────────────────────────────────
+curl -X POST http://localhost:8000/agents/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "YOUR_AGENT_ID", "status": "online"}'
+# → {"acknowledged": true, "pending_tasks": []}
+
+# ── Step 7: Write memory to Hash Sphere ──────────────────────────
+curl -X POST http://localhost:8000/memory/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "YOUR_AGENT_ID", "content": "First memory from my OpenClaw agent"}'
+# → {"success": true, "data": {"id": "ee8f1d6d-...", "hash": "242c26...", "resonance_score": 1.69}}
 ```
 
-Your JWT is stored securely at `~/.openclaw/tokens.json` (chmod 600). All subsequent API calls auto-authenticate — no manual token management needed.
+JWT is stored at `~/.openclaw/tokens.json` (chmod 600). Tokens auto-refresh — no manual re-authentication.
 
 ---
 

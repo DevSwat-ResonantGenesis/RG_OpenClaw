@@ -84,12 +84,16 @@ _custom_skills_store: Dict[str, list] = {}
 # ============================================
 
 def _get_user_id(request: Request) -> str:
-    """Extract user ID from gateway-injected headers."""
+    """Extract user ID from gateway headers or local JWT (standalone mode)."""
     user_id = (
         request.headers.get("x-user-id")
         or request.headers.get("rg-user-id")
         or ""
     )
+    # Standalone mode: fall back to locally stored JWT identity
+    if not user_id:
+        from . import platform_auth
+        user_id = platform_auth.get_user_id() or ""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user_id
@@ -113,14 +117,40 @@ async def _agent_engine_request(
     timeout: float = 10.0,
     extra_headers: dict = None,
 ) -> dict:
-    """Make authenticated request to agent_engine_service."""
-    url = f"{settings.AGENT_ENGINE_URL}/{path.lstrip('/')}"
+    """Make authenticated request to agent_engine_service.
+    
+    NOTE: AGENT_ENGINE_URL may be https://dev-swat.com/api/v1/agents (standalone)
+    or http://agent_engine_service:8000 (Docker).
+    
+    For gateway mode: /api/v1/agents/{path} → gateway proxies to agent_engine as agents/{path}.
+    So paths starting with 'agents/' must be stripped to avoid agents/agents/ double-prefix.
+    For Docker mode: paths go direct — no stripping needed.
+    """
+    clean_path = path.lstrip("/")
+    # Gateway mode: AGENT_ENGINE_URL already maps to /agents on the service
+    # The gateway catch-all re-adds 'agents/' prefix, so strip it here
+    is_gateway = "/api/v1/agents" in settings.AGENT_ENGINE_URL or "dev-swat.com" in settings.AGENT_ENGINE_URL
+    if is_gateway and clean_path.startswith("agents"):
+        # "agents/" → "" , "agents/{id}" → "{id}"
+        clean_path = clean_path[len("agents"):].lstrip("/")
+    url = f"{settings.AGENT_ENGINE_URL.rstrip('/')}/{clean_path}" if clean_path else settings.AGENT_ENGINE_URL.rstrip("/")
+    logger.info("Agent engine request: %s %s", method, url)
     headers = {
         "x-user-id": user_id,
         "Content-Type": "application/json",
     }
     if settings.INTERNAL_SERVICE_KEY:
         headers["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+    # Standalone mode: inject JWT for gateway authentication
+    from . import platform_auth
+    auth_headers = {}
+    try:
+        import asyncio
+        auth_headers = await platform_auth.get_auth_headers()
+    except Exception:
+        pass
+    if auth_headers:
+        headers.update(auth_headers)
     if extra_headers:
         headers.update(extra_headers)
 
@@ -136,13 +166,23 @@ async def _agent_engine_request(
         else:
             raise ValueError(f"Unsupported method: {method}")
 
+    is_json = resp.headers.get("content-type", "").startswith("application/json")
     if resp.status_code >= 400:
         logger.warning(f"Agent engine {method} {path} returned {resp.status_code}: {resp.text[:200]}")
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=resp.json().get("detail", resp.text[:200]) if resp.headers.get("content-type", "").startswith("application/json") else resp.text[:200],
-        )
-    return resp.json()
+        detail = resp.text[:200]
+        if is_json:
+            try:
+                detail = resp.json().get("detail", detail)
+            except Exception:
+                pass
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+    if is_json:
+        return resp.json()
+    # Non-JSON success response — try parsing anyway, fall back to dict
+    try:
+        return resp.json()
+    except Exception:
+        return {"raw": resp.text[:500], "status_code": resp.status_code}
 
 
 # ============================================
@@ -202,6 +242,16 @@ async def auth_status():
 
     import time as _time
     expires_at = tokens.get("expires_at", 0)
+    # Fallback: decode exp from JWT if expires_at not stored
+    if not expires_at and tokens.get("access_token"):
+        try:
+            import base64, json as _json
+            payload_b64 = tokens["access_token"].split(".")[1]
+            payload_b64 += "=" * (4 - len(payload_b64) % 4)
+            payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+            expires_at = payload.get("exp", 0)
+        except Exception:
+            pass
     expired = _time.time() >= expires_at
     ttl = max(0, int(expires_at - _time.time()))
 
@@ -926,8 +976,14 @@ async def memory_ingest(body: MemoryBridgeIngest, request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            from . import platform_auth
+            auth_hdrs = await platform_auth.get_auth_headers()
+            hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+            if settings.INTERNAL_SERVICE_KEY:
+                hdrs["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+            hdrs.update(auth_hdrs)
             resp = await client.post(
-                f"{settings.MEMORY_SERVICE_URL}/memories/ingest",
+                f"{settings.MEMORY_SERVICE_URL}/ingest",
                 json={
                     "content": body.content,
                     "memory_type": body.memory_type,
@@ -938,10 +994,7 @@ async def memory_ingest(body: MemoryBridgeIngest, request: Request):
                     },
                     "tags": body.tags or [],
                 },
-                headers={
-                    "x-user-id": user_id,
-                    "x-internal-service-key": settings.INTERNAL_SERVICE_KEY,
-                },
+                headers=hdrs,
             )
         if resp.status_code >= 400:
             return {"success": False, "error": f"Memory service returned {resp.status_code}"}
@@ -964,8 +1017,14 @@ async def memory_query(body: MemoryBridgeQuery, request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            from . import platform_auth
+            auth_hdrs = await platform_auth.get_auth_headers()
+            hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+            if settings.INTERNAL_SERVICE_KEY:
+                hdrs["x-internal-service-key"] = settings.INTERNAL_SERVICE_KEY
+            hdrs.update(auth_hdrs)
             resp = await client.post(
-                f"{settings.MEMORY_SERVICE_URL}/memories/search",
+                f"{settings.MEMORY_SERVICE_URL}/search",
                 json={
                     "query": body.query,
                     "limit": body.limit,
@@ -974,10 +1033,7 @@ async def memory_query(body: MemoryBridgeQuery, request: Request):
                         "memory_type": body.memory_type,
                     },
                 },
-                headers={
-                    "x-user-id": user_id,
-                    "x-internal-service-key": settings.INTERNAL_SERVICE_KEY,
-                },
+                headers=hdrs,
             )
         if resp.status_code >= 400:
             return MemoryBridgeResponse(memories=[], count=0, source="hash_sphere")
@@ -1009,12 +1065,19 @@ async def _fetch_platform_tools() -> list:
     if _cached_platform_tools and _cached_at and (time.time() - _cached_at) < 300:
         return _cached_platform_tools
     try:
+        from . import platform_auth
+        headers = await platform_auth.get_auth_headers()
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{settings.AGENT_ENGINE_URL}/agents/tools/list")
+            resp = await client.get(f"{settings.AGENT_ENGINE_URL}/tools/list", headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
-                _cached_platform_tools = data.get("tools", [])
+                # API may return a list directly or {"tools": [...]}
+                if isinstance(data, list):
+                    _cached_platform_tools = data
+                else:
+                    _cached_platform_tools = data.get("tools", data.get("items", []))
                 _cached_at = time.time()
+                logger.info("Fetched %d platform tools", len(_cached_platform_tools))
                 return _cached_platform_tools
     except Exception as e:
         logger.warning(f"Failed to fetch platform tools: {e}")
@@ -1076,24 +1139,23 @@ async def execute_skill(body: SkillExecuteRequest, request: Request):
                 except Exception as e:
                     return SkillExecuteResponse(success=False, error=str(e), skill_name=body.skill_name)
 
-    # Platform tool — execute directly via agent_engine /tools/execute
+    # Platform tool — execute via agent_engine /tools/execute
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{settings.AGENT_ENGINE_URL}/agents/tools/execute",
-                json={"tool_name": body.skill_name, "tool_input": body.parameters or {}},
-                headers={
-                    "x-user-id": user_id,
-                    "x-internal-service-key": settings.INTERNAL_SERVICE_KEY,
-                },
-            )
-            data = resp.json()
-            return SkillExecuteResponse(
-                success=data.get("success", False),
-                result=data.get("result"),
-                error=data.get("error"),
-                skill_name=body.skill_name,
-            )
+        result = await _agent_engine_request(
+            "POST",
+            "tools/execute",
+            user_id,
+            json_body={"tool_name": body.skill_name, "tool_input": body.parameters or {}},
+            timeout=30.0,
+        )
+        return SkillExecuteResponse(
+            success=result.get("success", False),
+            result=result.get("result"),
+            error=result.get("error"),
+            skill_name=body.skill_name,
+        )
+    except HTTPException as he:
+        return SkillExecuteResponse(success=False, error=str(he.detail), skill_name=body.skill_name)
     except Exception as e:
         return SkillExecuteResponse(success=False, error=str(e), skill_name=body.skill_name)
 
