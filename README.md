@@ -324,7 +324,19 @@ nano .env  # Set your platform credentials (see Configuration below)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The connector is now running at `http://localhost:8000`. Your OpenClaw agent can call platform tools via the `/skills/execute` endpoint.
+The connector is now running at `http://localhost:8000`.
+
+```bash
+# 6. Authenticate with the platform (same credentials as dev-swat.com)
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "your-password"}'
+
+# 7. Verify authentication
+curl http://localhost:8000/auth/status
+```
+
+Your JWT is stored securely at `~/.openclaw/tokens.json` (chmod 600). All subsequent API calls auto-authenticate — no manual token management needed.
 
 ---
 
@@ -333,80 +345,78 @@ The connector is now running at `http://localhost:8000`. Your OpenClaw agent can
 Create a `.env` file in the project root:
 
 ```env
-# === Required ===
-# Your ResonantGenesis platform account credentials
-# Same account you use for Resonant IDE and Mining App
-RG_PLATFORM_URL=https://dev-swat.com
-
-# === Platform Service URLs (defaults work for Docker deployment) ===
-AGENT_ENGINE_URL=http://agent_engine_service:8000
-AUTH_SERVICE_URL=http://auth_service:8000
-MEMORY_SERVICE_URL=http://memory_service:8000
-
-# === For standalone local use, point to public gateway ===
-# AGENT_ENGINE_URL=https://dev-swat.com/agents
-# AUTH_SERVICE_URL=https://dev-swat.com/auth
-# MEMORY_SERVICE_URL=https://dev-swat.com/memory
-
-# === Optional ===
-OPENCLAW_SERVICE_ENABLED=true
+# === Platform Domain ===
 PLATFORM_DOMAIN=dev-swat.com
-INTERNAL_SERVICE_KEY=  # Only needed for server-side deployment
-OPENCLAW_GATEWAY_URL=ws://openclaw_gateway:18789
-OPENCLAW_GATEWAY_TOKEN=  # Gateway auth token (if applicable)
+
+# === Platform Service URLs (standalone — through gateway HTTPS) ===
+AUTH_SERVICE_URL=https://dev-swat.com/auth
+AGENT_ENGINE_URL=https://dev-swat.com/api/v1/agents
+MEMORY_SERVICE_URL=https://dev-swat.com/api/v1/memory
+BLOCKCHAIN_SERVICE_URL=https://dev-swat.com/blockchain
+LLM_SERVICE_URL=https://dev-swat.com/api/v1/llm
+RARA_SERVICE_URL=https://dev-swat.com/api/v1/rara
+
+# === Service Toggle ===
+OPENCLAW_SERVICE_ENABLED=true
 ```
+
+> **Note**: Defaults are standalone-first — all traffic routes through the platform's existing HTTPS gateway. No ports are exposed publicly. For Docker deployment, see the Docker section below.
 
 ### Environment Variables Reference
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AGENT_ENGINE_URL` | Yes | `http://agent_engine_service:8000` | Agent engine for tool execution |
-| `AUTH_SERVICE_URL` | Yes | `http://auth_service:8000` | Platform authentication service |
-| `MEMORY_SERVICE_URL` | No | `http://memory_service:8000` | Hash Sphere memory service |
 | `PLATFORM_DOMAIN` | No | `dev-swat.com` | Platform domain for webhook URLs |
-| `INTERNAL_SERVICE_KEY` | No | `""` | Service-to-service auth key |
+| `AUTH_SERVICE_URL` | Yes | `https://dev-swat.com/auth` | Platform auth (through gateway) |
+| `AGENT_ENGINE_URL` | Yes | `https://dev-swat.com/api/v1/agents` | Agent engine for tool execution |
+| `MEMORY_SERVICE_URL` | No | `https://dev-swat.com/api/v1/memory` | Hash Sphere memory service |
+| `BLOCKCHAIN_SERVICE_URL` | No | `https://dev-swat.com/blockchain` | Blockchain identity anchoring |
+| `LLM_SERVICE_URL` | No | `https://dev-swat.com/api/v1/llm` | Unified LLM service |
+| `RARA_SERVICE_URL` | No | `https://dev-swat.com/api/v1/rara` | RARA governance service |
+| `INTERNAL_SERVICE_KEY` | No | `""` | Service-to-service auth (Docker only) |
 | `OPENCLAW_SERVICE_ENABLED` | No | `true` | Enable/disable the service |
-| `OPENCLAW_GATEWAY_URL` | No | `ws://openclaw_gateway:18789` | WebSocket gateway URL |
-| `OPENCLAW_GATEWAY_TOKEN` | No | `""` | Gateway authentication token |
 
 ---
 
 ## Architecture
 
 ```
-Your Machine                          ResonantGenesis Platform
-─────────────                         ──────────────────────────
+Your Machine                          ResonantGenesis Platform (HTTPS only)
+─────────────                         ─────────────────────────────────────
                                       
-┌──────────────┐   WebSocket RPC     ┌─────────────────────┐
-│  OpenClaw    │ ◄─────────────────► │  OpenClaw Gateway   │
-│  Agent       │   (bidirectional)   │  (ws://gateway)     │
-│  (pi-agent)  │                     └─────────┬───────────┘
-└──────┬───────┘                               │
-       │                              ┌────────▼──────────┐
-       │  HTTP REST                   │  OpenClaw Service  │
-       └─────────────────────────────►│  (this connector)  │
-         /skills/execute              └────────┬───────────┘
-         /skills/available                     │
-         /agents/register                      │ HTTP
-         /memory/*                    ┌────────▼──────────┐
-         /heartbeat                   │  Agent Engine      │
-                                      │  (162 tools)       │
-                                      │  (560+ APIs)       │
-                                      └────────┬───────────┘
-                                               │
-                                      ┌────────▼──────────┐
-                                      │  Platform Services │
-                                      │  42 microservices  │
-                                      └───────────────────┘
+┌──────────────┐                     ┌──────────────────────┐
+│  OpenClaw    │                     │  HTTPS Gateway       │ ← TLS termination
+│  Agent       │  JWT-authenticated  │  (dev-swat.com:443)  │   CORS lockdown
+│  (pi-agent)  │  HTTPS REST         │  JWT validation      │   Rate limiting
+└──────┬───────┘ ─────────────────►  └──────────┬───────────┘
+       │                                        │ internal network
+       │  localhost:8000              ┌──────────▼───────────┐
+       │  (your machine only)         │  OpenClaw Service    │ ← zero ports exposed
+┌──────▼───────┐                     │  (openclaw_service)  │   internal only
+│  Connector   │                     └──────────┬───────────┘
+│  (this repo) │                                │
+│              │                     ┌──────────▼───────────┐
+│  /auth/login │                     │  Agent Engine         │
+│  /skills/*   │                     │  (162 tools)          │
+│  /agents/*   │                     │  (560+ APIs)          │
+│  /memory/*   │                     └──────────┬───────────┘
+└──────────────┘                                │
+                                     ┌──────────▼───────────┐
+                                     │  Platform Services    │
+                                     │  42 microservices     │
+                                     └──────────────────────┘
 ```
+
+> **Security**: Zero ports exposed to the internet. All traffic routes through the platform's existing HTTPS gateway with full JWT authentication, CORS lockdown, and rate limiting.
 
 ### How It Works
 
-1. **Your agent authenticates** with the same JWT flow as Resonant IDE and Mining App
+1. **Authenticate locally**: `POST /auth/login` with your dev-swat.com credentials — JWT stored at `~/.openclaw/tokens.json`
 2. **Tool discovery**: Call `GET /skills/available` — returns all 162 platform tools with descriptions
-3. **Tool execution**: Call `POST /skills/execute` with `{skill_name, parameters}` — the connector routes it to the platform's tool execution engine and returns results
-4. **Bidirectional bridge**: The WebSocket channel also allows the platform to dispatch tasks TO your agent
+3. **Tool execution**: Call `POST /skills/execute` with `{skill_name, parameters}` — routed through the secure gateway to the platform's tool execution engine
+4. **Agent registration**: `POST /agents/register` creates your agent on the platform with DSID identity + RARA governance
 5. **Heartbeat**: Your agent sends periodic heartbeats so the platform knows it's online
+6. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
 
 ### Wire Protocol (WebSocket RPC)
 
@@ -641,10 +651,11 @@ Your Agent: "Store this memory"
 RG_OpenClaw/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py          # FastAPI app entry point
-│   ├── config.py         # Environment configuration (Pydantic Settings)
-│   ├── models.py         # All request/response Pydantic models
-│   └── routers.py        # All REST endpoints (connections, skills, memory, governance)
+│   ├── main.py           # FastAPI app entry point
+│   ├── config.py          # Environment configuration (Pydantic Settings)
+│   ├── models.py          # All request/response Pydantic models
+│   ├── platform_auth.py   # JWT auth — login, token storage, auto-refresh
+│   └── routers.py         # All REST endpoints (auth, connections, skills, memory, governance)
 ├── Dockerfile            # Production container (python:3.11-slim)
 ├── requirements.txt      # FastAPI, httpx, pydantic, python-jose
 ├── .env.example          # Example environment configuration
@@ -669,9 +680,13 @@ openclaw_service:
     AGENT_ENGINE_URL: http://agent_engine_service:8000
     AUTH_SERVICE_URL: http://auth_service:8000
     MEMORY_SERVICE_URL: http://memory_service:8000
+    BLOCKCHAIN_SERVICE_URL: http://blockchain_service:8000
+    LLM_SERVICE_URL: http://llm_service:8000
     PLATFORM_DOMAIN: dev-swat.com
-  ports:
-    - "8000"
+    INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
+  # No ports exposed — internal network only. Gateway proxies all traffic.
+  networks:
+    - app-network
   restart: unless-stopped
 ```
 

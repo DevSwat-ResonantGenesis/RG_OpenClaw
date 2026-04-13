@@ -146,6 +146,92 @@ async def _agent_engine_request(
 
 
 # ============================================
+# LOCAL AUTHENTICATION (standalone mode only)
+# ============================================
+# When running locally, the user must authenticate with the platform first.
+# These endpoints handle JWT login/refresh/logout through the platform's
+# existing HTTPS gateway — zero ports exposed, enterprise-grade security.
+
+@router.post("/auth/login")
+async def auth_login(request: Request):
+    """
+    Authenticate with ResonantGenesis platform.
+
+    Body: {"email": "...", "password": "..."}
+    Stores JWT locally at ~/.openclaw/tokens.json (chmod 600).
+    All subsequent API calls auto-attach the token.
+    """
+    from . import platform_auth
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email and password are required")
+
+    result = await platform_auth.login(email, password)
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("error", "Authentication failed"))
+
+    return result
+
+
+@router.post("/auth/logout")
+async def auth_logout():
+    """Clear stored JWT tokens."""
+    from . import platform_auth
+    return await platform_auth.logout()
+
+
+@router.get("/auth/status")
+async def auth_status():
+    """Check current authentication status (no network call)."""
+    from . import platform_auth
+    tokens = platform_auth._token_cache or platform_auth._load_tokens()
+
+    if not tokens.get("access_token"):
+        return {
+            "authenticated": False,
+            "message": "Not authenticated. POST /auth/login with email and password.",
+        }
+
+    import time as _time
+    expires_at = tokens.get("expires_at", 0)
+    expired = _time.time() >= expires_at
+    ttl = max(0, int(expires_at - _time.time()))
+
+    return {
+        "authenticated": True,
+        "user_id": tokens.get("user_id", ""),
+        "email": tokens.get("email", ""),
+        "platform": tokens.get("platform_domain", ""),
+        "token_expired": expired,
+        "token_ttl_seconds": ttl,
+        "has_refresh_token": bool(tokens.get("refresh_token")),
+    }
+
+
+@router.post("/auth/refresh")
+async def auth_refresh():
+    """Force refresh the access token using stored refresh token."""
+    from . import platform_auth
+
+    if not platform_auth.is_authenticated():
+        raise HTTPException(status_code=401, detail="Not authenticated — login first")
+
+    success = await platform_auth.refresh_token()
+    if not success:
+        raise HTTPException(status_code=401, detail="Token refresh failed — re-login required")
+
+    return {"success": True, "message": "Token refreshed"}
+
+
+# ============================================
 # HEALTH & INFO
 # ============================================
 
@@ -160,14 +246,9 @@ async def health_check():
     except Exception:
         pass
 
-    # Check OpenClaw Gateway health
-    gateway_ok = False
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.OPENCLAW_GATEWAY_HTTP_URL}/healthz")
-            gateway_ok = resp.status_code == 200
-    except Exception:
-        pass
+    # Check if locally authenticated (standalone mode)
+    from . import platform_auth
+    authenticated = platform_auth.is_authenticated()
 
     return ServiceHealth(
         service="openclaw_service",
