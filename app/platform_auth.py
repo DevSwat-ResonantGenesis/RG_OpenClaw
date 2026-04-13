@@ -73,8 +73,12 @@ def _clear_tokens():
 
 
 def get_auth_url() -> str:
-    """Get the auth service URL — uses gateway for standalone, direct for Docker."""
-    url = settings.AUTH_SERVICE_URL
+    """Get the auth service base URL.
+    
+    For standalone: AUTH_SERVICE_URL=https://dev-swat.com/auth (already has /auth)
+    For Docker:     AUTH_SERVICE_URL=http://auth_service:8000 (no prefix)
+    """
+    url = settings.AUTH_SERVICE_URL.rstrip("/")
     # If pointing at Docker internal hostname, not reachable from local machine
     if "auth_service:" in url:
         return f"https://{settings.PLATFORM_DOMAIN}/auth"
@@ -94,7 +98,12 @@ async def login(email: str, password: str) -> Dict[str, Any]:
         Dict with user_id, access_token expiry, and login status.
     """
     auth_url = get_auth_url()
-    login_url = f"{auth_url}/auth/login"
+    # auth_url already includes /auth for standalone (e.g. https://dev-swat.com/auth)
+    # For Docker it's http://auth_service:8000 — need to append /auth/login
+    if auth_url.endswith("/auth"):
+        login_url = f"{auth_url}/login"
+    else:
+        login_url = f"{auth_url}/auth/login"
 
     logger.info("Authenticating with %s ...", settings.PLATFORM_DOMAIN)
 
@@ -180,7 +189,10 @@ async def refresh_token() -> bool:
             return False
 
         auth_url = get_auth_url()
-        refresh_url = f"{auth_url}/auth/refresh"
+        if auth_url.endswith("/auth"):
+            refresh_url = f"{auth_url}/refresh"
+        else:
+            refresh_url = f"{auth_url}/auth/refresh"
 
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
