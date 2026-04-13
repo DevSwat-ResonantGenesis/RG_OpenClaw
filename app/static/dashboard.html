@@ -6,11 +6,11 @@
 <title>OpenClaw — Federated Agent Connector</title>
 <style>
   :root {
-    --bg: #0a0e17; --bg2: #111827; --bg3: #1f2937;
-    --text: #e5e7eb; --muted: #9ca3af;
-    --pink: #FA547C; --teal: #01A6BC; --green: #71C23E;
-    --orange: #FAA525; --yellow: #FFD800; --red: #ef4444;
-    --border: #1e293b;
+    --bg: #121214; --bg2: #1a1a1e; --bg3: #242428;
+    --text: #FFFFFF; --muted: #a0a0a8;
+    --orange: #FAA525; --teal: #01A6BC; --pink: #FA547C;
+    --green: #71C23E; --yellow: #FFD800; --red: #FA547C;
+    --border: #2a2a30;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:var(--bg); color:var(--text); font-family:'Inter',-apple-system,system-ui,sans-serif; min-height:100vh; }
@@ -19,16 +19,16 @@
   .header { background:var(--bg2); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; }
   .header-left { display:flex; align-items:center; gap:12px; }
   .header h1 { font-size:20px; font-weight:700; letter-spacing:-0.5px; }
-  .header h1 .accent { color:var(--green); }
+  .header h1 .accent { color:var(--orange); }
   .header h1 .plus { color:var(--teal); font-weight:800; }
   .logo { font-size:28px; }
   .header-right { display:flex; align-items:center; gap:16px; font-size:13px; color:var(--muted); }
   .status-pill { display:flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; }
   .status-pill.online { background:rgba(113,194,62,0.1); color:var(--green); border:1px solid rgba(113,194,62,0.2); }
-  .status-pill.offline { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.2); }
+  .status-pill.offline { background:rgba(250,84,124,0.1); color:var(--pink); border:1px solid rgba(250,84,124,0.2); }
   .status-dot { width:7px; height:7px; border-radius:50%; }
-  .status-pill.online .status-dot { background:var(--green); box-shadow:0 0 6px var(--green); animation:pulse 2s infinite; }
-  .status-pill.offline .status-dot { background:var(--red); }
+  .status-pill.online .status-dot { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  .status-pill.offline .status-dot { background:var(--pink); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
   /* Grid */
@@ -57,36 +57,36 @@
   /* Table */
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th { text-align:left; padding:8px 10px; color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid var(--border); }
-  td { padding:8px 10px; border-bottom:1px solid rgba(30,41,59,0.5); font-variant-numeric:tabular-nums; }
+  td { padding:8px 10px; border-bottom:1px solid rgba(42,42,48,0.5); font-variant-numeric:tabular-nums; }
   tr:last-child td { border-bottom:none; }
   .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
   .badge-green { background:rgba(113,194,62,0.12); color:var(--green); }
   .badge-teal { background:rgba(1,166,188,0.12); color:var(--teal); }
   .badge-pink { background:rgba(250,84,124,0.12); color:var(--pink); }
   .badge-orange { background:rgba(250,165,37,0.12); color:var(--orange); }
-  .badge-red { background:rgba(239,68,68,0.12); color:var(--red); }
+  .badge-red { background:rgba(250,84,124,0.12); color:var(--pink); }
   .badge-muted { background:rgba(156,163,175,0.1); color:var(--muted); }
 
   /* Activity log */
-  .log-entry { padding:8px 0; border-bottom:1px solid rgba(30,41,59,0.4); font-size:13px; display:flex; gap:10px; }
+  .log-entry { padding:8px 0; border-bottom:1px solid rgba(42,42,48,0.6); font-size:13px; display:flex; gap:10px; }
   .log-entry:last-child { border-bottom:none; }
   .log-time { color:var(--muted); font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; min-width:70px; }
   .log-msg { flex:1; }
   .log-msg .tool { color:var(--teal); }
   .log-msg .success { color:var(--green); }
-  .log-msg .error { color:var(--red); }
+  .log-msg .error { color:var(--pink); }
 
   /* How it works */
-  .flow-step { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(30,41,59,0.3); align-items:flex-start; }
+  .flow-step { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(42,42,48,0.4); align-items:flex-start; }
   .flow-step:last-child { border-bottom:none; }
-  .flow-num { width:28px; height:28px; border-radius:50%; background:rgba(1,166,188,0.12); color:var(--teal); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .flow-num { width:28px; height:28px; border-radius:50%; background:rgba(250,165,37,0.12); color:var(--orange); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
   .flow-text { font-size:13px; line-height:1.5; }
   .flow-text strong { color:var(--text); }
   .flow-text span { color:var(--muted); }
 
   /* Refresh btn */
   .refresh-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; transition:0.15s; }
-  .refresh-btn:hover { background:var(--teal); border-color:var(--teal); color:#fff; }
+  .refresh-btn:hover { background:var(--orange); border-color:var(--orange); color:#121214; }
 
   /* Link */
   a { color:var(--teal); text-decoration:none; }
@@ -105,10 +105,10 @@
 
   /* Auth buttons */
   .auth-btn { padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; border:none; transition:0.15s; }
-  .auth-btn.login { background:var(--green); color:#0a0e17; }
-  .auth-btn.login:hover { background:#8ad44e; }
-  .auth-btn.logout { background:rgba(239,68,68,0.12); color:var(--red); border:1px solid rgba(239,68,68,0.25); }
-  .auth-btn.logout:hover { background:rgba(239,68,68,0.25); }
+  .auth-btn.login { background:var(--orange); color:#121214; }
+  .auth-btn.login:hover { background:#fbb44a; }
+  .auth-btn.logout { background:rgba(250,84,124,0.12); color:var(--pink); border:1px solid rgba(250,84,124,0.25); }
+  .auth-btn.logout:hover { background:rgba(250,84,124,0.25); }
 
   /* Modal */
   .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:1000; }
@@ -120,12 +120,12 @@
   .modal input:focus { border-color:var(--teal); box-shadow:0 0 0 2px rgba(1,166,188,0.15); }
   .modal-actions { display:flex; gap:10px; margin-top:8px; }
   .modal-actions button { flex:1; padding:10px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; border:none; transition:0.15s; }
-  .modal-actions .btn-primary { background:var(--green); color:#0a0e17; }
-  .modal-actions .btn-primary:hover { background:#8ad44e; }
+  .modal-actions .btn-primary { background:var(--orange); color:#121214; font-weight:700; }
+  .modal-actions .btn-primary:hover { background:#fbb44a; }
   .modal-actions .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
   .modal-actions .btn-cancel { background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
   .modal-actions .btn-cancel:hover { background:var(--bg); }
-  .modal-error { color:var(--red); font-size:12px; margin-bottom:10px; display:none; }
+  .modal-error { color:var(--pink); font-size:12px; margin-bottom:10px; display:none; }
   .modal-success { color:var(--green); font-size:12px; margin-bottom:10px; display:none; }
 </style>
 </head>
