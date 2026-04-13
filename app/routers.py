@@ -243,14 +243,31 @@ async def auth_status():
 
     import time as _time
     expires_at = tokens.get("expires_at", 0)
-    # Fallback: decode exp from JWT if expires_at not stored
-    if not expires_at and tokens.get("access_token"):
+    email = tokens.get("email", "")
+    user_id = tokens.get("user_id", "")
+
+    # Fallback: decode claims from JWT if not stored
+    if tokens.get("access_token") and (not expires_at or not email or not user_id):
         try:
             import base64, json as _json
             payload_b64 = tokens["access_token"].split(".")[1]
             payload_b64 += "=" * (4 - len(payload_b64) % 4)
             payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
-            expires_at = payload.get("exp", 0)
+            if not expires_at:
+                expires_at = payload.get("exp", 0)
+            if not email:
+                email = payload.get("email", payload.get("preferred_username", ""))
+            if not user_id:
+                user_id = payload.get("sub", payload.get("user_id", ""))
+            # Backfill into token cache so dashboard/data picks it up
+            if email and not tokens.get("email"):
+                tokens["email"] = email
+                platform_auth._token_cache["email"] = email
+                platform_auth._save_tokens(platform_auth._token_cache)
+            if user_id and not tokens.get("user_id"):
+                tokens["user_id"] = user_id
+                platform_auth._token_cache["user_id"] = user_id
+                platform_auth._save_tokens(platform_auth._token_cache)
         except Exception:
             pass
     expired = _time.time() >= expires_at
@@ -258,8 +275,8 @@ async def auth_status():
 
     return {
         "authenticated": True,
-        "user_id": tokens.get("user_id", ""),
-        "email": tokens.get("email", ""),
+        "user_id": user_id,
+        "email": email,
         "platform": tokens.get("platform_domain", ""),
         "token_expired": expired,
         "token_ttl_seconds": ttl,
@@ -1295,6 +1312,24 @@ async def _poll_federation_tasks():
                 continue
 
             user_id = platform_auth._token_cache.get("user_id", "")
+            if not user_id:
+                # Decode from JWT if not stored
+                try:
+                    import base64, json as _json
+                    tok = platform_auth._token_cache.get("access_token", "")
+                    if tok:
+                        payload_b64 = tok.split(".")[1]
+                        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+                        claims = _json.loads(base64.urlsafe_b64decode(payload_b64))
+                        user_id = claims.get("sub", claims.get("user_id", ""))
+                        if user_id:
+                            platform_auth._token_cache["user_id"] = user_id
+                            email = claims.get("email", "")
+                            if email:
+                                platform_auth._token_cache["email"] = email
+                            platform_auth._save_tokens(platform_auth._token_cache)
+                except Exception:
+                    pass
             if not user_id:
                 await asyncio.sleep(poll_interval)
                 continue
