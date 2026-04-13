@@ -1245,6 +1245,7 @@ async def _poll_federation_tasks():
                     "duration_ms": elapsed,
                     "status": "completed" if result_body.get("success") else "failed",
                     "task_id": task_id,
+                    "output": result_body.get("output", ""),
                 })
                 if len(_task_log) > 20:
                     _task_log[:] = _task_log[:20]

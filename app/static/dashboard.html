@@ -103,6 +103,16 @@
 
   .empty-state { text-align:center; padding:32px; color:var(--muted); font-size:13px; }
 
+  /* Task output */
+  .task-output { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-top:8px; font-size:13px; line-height:1.7; max-height:300px; overflow-y:auto; }
+  .task-output a { color:var(--teal); }
+  .task-output strong { color:var(--orange); }
+  .expand-btn { background:none; border:none; color:var(--teal); cursor:pointer; font-size:12px; padding:2px 6px; font-weight:600; }
+  .expand-btn:hover { text-decoration:underline; }
+  .task-row { border-bottom:1px solid rgba(42,42,48,0.5); }
+  .task-row:last-child { border-bottom:none; }
+  .task-row td { vertical-align:top; }
+
   /* Auth buttons */
   .auth-btn { padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; border:none; transition:0.15s; }
   .auth-btn.login { background:var(--orange); color:#121214; }
@@ -203,9 +213,9 @@
   </div>
 
   <!-- Task History -->
-  <div class="card">
-    <div class="card-header"><span class="icon">&#128203;</span><h2>Task History</h2></div>
-    <div class="card-body scroll" id="task-history">
+  <div class="card full-width">
+    <div class="card-header"><span class="icon">&#128203;</span><h2>Task History &amp; Output</h2></div>
+    <div class="card-body scroll" id="task-history" style="max-height:420px">
       <div class="empty-state">No tasks yet. Click "Run" on your agent at <a href="https://dev-swat.com/agents" target="_blank">dev-swat.com/agents</a></div>
     </div>
   </div>
@@ -404,13 +414,23 @@ async function fetchDashboard() {
     if (!tasks.length) {
       tasksEl.innerHTML = '<div class="empty-state">No tasks yet. Click "Run" on your agent at <a href="https://dev-swat.com/agents" target="_blank">dev-swat.com/agents</a></div>';
     } else {
-      tasksEl.innerHTML = '<table><thead><tr><th>Goal</th><th>Tools</th><th>Duration</th><th>Status</th></tr></thead><tbody>' +
-        tasks.map(t => `<tr>
-          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.goal}">${t.goal}</td>
-          <td style="color:var(--teal);font-size:12px">${(t.tools_used || []).join(', ') || '-'}</td>
-          <td style="font-variant-numeric:tabular-nums">${t.duration_ms ? (t.duration_ms/1000).toFixed(1)+'s' : '-'}</td>
-          <td><span class="badge ${t.status === 'completed' ? 'badge-green' : t.status === 'failed' ? 'badge-red' : 'badge-orange'}">${t.status}</span></td>
-        </tr>`).join('') + '</tbody></table>';
+      tasksEl.innerHTML = '<table><thead><tr><th>Goal</th><th>Tools</th><th>Duration</th><th>Status</th><th></th></tr></thead><tbody>' +
+        tasks.map((t, i) => {
+          const hasOutput = t.output && t.output.trim();
+          const outputHtml = hasOutput ? t.output
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+            .replace(/^- /gm, '&bull; ')
+            .replace(/\n/g, '<br>') : '';
+          return `<tr class="task-row">
+            <td style="max-width:260px;font-weight:500" title="${t.goal}">${t.goal}</td>
+            <td style="color:var(--teal);font-size:12px">${(t.tools_used || []).join(', ') || '-'}</td>
+            <td style="font-variant-numeric:tabular-nums">${t.duration_ms ? (t.duration_ms/1000).toFixed(1)+'s' : '-'}</td>
+            <td><span class="badge ${t.status === 'completed' ? 'badge-green' : t.status === 'failed' ? 'badge-red' : 'badge-orange'}">${t.status}</span></td>
+            <td>${hasOutput ? `<button class="expand-btn" onclick="toggleOutput(${i})">&#9660; Output</button>` : ''}</td>
+          </tr>
+          ${hasOutput ? `<tr id="output-row-${i}" style="display:none"><td colspan="5"><div class="task-output">${outputHtml}</div></td></tr>` : ''}`;
+        }).join('') + '</tbody></table>';
     }
 
     // Activity log from server
@@ -426,6 +446,13 @@ async function fetchDashboard() {
   } catch(e) {
     console.error('Dashboard fetch error:', e);
   }
+}
+
+function toggleOutput(idx) {
+  const row = document.getElementById('output-row-' + idx);
+  if (!row) return;
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : 'table-row';
 }
 
 function refreshAll() {
