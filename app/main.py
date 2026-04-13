@@ -43,6 +43,38 @@ app.add_middleware(
 app.include_router(router)
 
 
+@app.get("/")
+async def root():
+    """Root endpoint — shows connector status and available endpoints."""
+    from . import platform_auth
+    tokens = platform_auth._token_cache or platform_auth._load_tokens()
+    import time
+    expires_at = tokens.get("expires_at", 0)
+    authenticated = bool(tokens.get("access_token")) and time.time() < expires_at
+    return {
+        "service": "RG_OpenClaw Connector",
+        "version": settings.SERVICE_VERSION,
+        "status": "running",
+        "authenticated": authenticated,
+        "user": tokens.get("email", "") if authenticated else None,
+        "platform": settings.PLATFORM_DOMAIN,
+        "endpoints": {
+            "health": "GET /health",
+            "auth_login": "POST /auth/login",
+            "auth_status": "GET /auth/status",
+            "skills_available": "GET /skills/available",
+            "skills_execute": "POST /skills/execute",
+            "agents_register": "POST /agents/register",
+            "agents_heartbeat": "POST /agents/heartbeat",
+            "memory_ingest": "POST /memory/ingest",
+            "memory_query": "POST /memory/query",
+            "manifest": "GET /manifest",
+            "setup_guide": "GET /setup-guide",
+        },
+        "docs": "http://localhost:8000/docs",
+    }
+
+
 @app.on_event("startup")
 async def startup():
     logger.info(
