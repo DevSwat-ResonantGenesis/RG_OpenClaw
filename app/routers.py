@@ -1313,12 +1313,36 @@ async def _llm_agent_execute(
 
             messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_text})
 
-    # If we exhausted loops without a final answer, compile what we have
+    # If we exhausted loops without a final answer, ask LLM for a summary
     last_content = ""
     for m in reversed(messages):
         if m.get("role") == "assistant" and m.get("content"):
             last_content = m["content"]
             break
+
+    if not last_content and tools_used:
+        # One final LLM call without tools — force a summary
+        try:
+            messages.append({"role": "user", "content": "Now summarize everything you found into a clear, complete answer. Do NOT call any more tools."})
+            summary_body = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": messages,
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            }
+            async with httpx.AsyncClient(timeout=60.0) as sc:
+                summary_resp = await sc.post(
+                    f"{settings.LLM_SERVICE_URL}/chat/completions",
+                    json=summary_body,
+                    headers=auth_hdrs,
+                )
+            if summary_resp.status_code == 200:
+                s_data = summary_resp.json()
+                s_msg = (s_data.get("choices") or [{}])[0].get("message", {})
+                last_content = s_msg.get("content", "")
+        except Exception as e:
+            logger.warning(f"[AGENT] Summary call failed: {e}")
+
     return {
         "success": bool(last_content or tools_used),
         "output": last_content or f"Agent used {len(tools_used)} tools but did not produce a final summary.",
