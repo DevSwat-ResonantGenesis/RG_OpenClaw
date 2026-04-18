@@ -1153,6 +1153,7 @@ async def _llm_agent_execute(
     auth_hdrs: dict,
     context: dict = None,
     max_loops: int = 8,
+    session_id: str = "",
 ) -> dict:
     """LLM-driven ReAct agent loop using ALL platform tools.
 
@@ -1293,13 +1294,41 @@ async def _llm_agent_execute(
             logger.info(f"[AGENT] Loop {loop_i+1}: calling {tool_name}({list(tool_args.keys())})")
             _add_activity(f'<span class="tool">{tool_name}</span>({", ".join(f"{k}=" for k in tool_args)})', 'info')
 
-            # Execute via platform
+            # Execute via platform (async for heavy tools, inline for light)
+            _HEAVY = {"web_search", "fetch_url", "browser_automation", "deep_research",
+                       "code_execution", "execute_code", "pdf_parse", "spreadsheet",
+                       "google_calendar", "google_drive", "database_query",
+                       "image_generation", "generate_image", "generate_audio", "generate_video"}
             try:
+                is_heavy = tool_name in _HEAVY
                 tool_result = await _agent_engine_request(
                     "POST", "tools/execute", user_id,
-                    json_body={"tool_name": tool_name, "tool_input": tool_args},
-                    timeout=30.0,
+                    json_body={
+                        "tool_name": tool_name,
+                        "tool_input": tool_args,
+                        "session_id": session_id,
+                        "async": is_heavy,
+                    },
+                    timeout=120.0 if is_heavy else 30.0,
                 )
+
+                # If async, poll for result
+                if tool_result.get("async") and tool_result.get("task_id"):
+                    celery_task_id = tool_result["task_id"]
+                    _add_activity(f'<span class="tool">{tool_name}</span> queued (background)', 'info')
+                    # Poll every 2s up to 2 minutes
+                    for _poll_i in range(60):
+                        await asyncio.sleep(2)
+                        poll_resp = await _agent_engine_request(
+                            "GET", f"tools/result/{celery_task_id}", user_id,
+                            timeout=10.0,
+                        )
+                        if poll_resp.get("ready"):
+                            tool_result = poll_resp
+                            break
+                    else:
+                        tool_result = {"success": False, "error": "Background tool timed out after 120s"}
+
                 result_text = ""
                 if tool_result.get("success"):
                     if tool_name not in tools_used:
@@ -1394,6 +1423,25 @@ async def _poll_federation_tasks():
             hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
             hdrs.update(auth_hdrs)
 
+            # Send heartbeat to platform so server knows we're alive
+            try:
+                # Fetch registered agents to get agent_ids for heartbeat
+                async with httpx.AsyncClient(timeout=8.0) as hb_client:
+                    agents_resp = await hb_client.get(
+                        f"{settings.AGENT_ENGINE_URL}",
+                        headers=hdrs,
+                    )
+                    if agents_resp.status_code == 200:
+                        for ag in agents_resp.json():
+                            if ag.get("agent_source") in ("federated", "openclaw"):
+                                await hb_client.post(
+                                    f"{settings.AGENT_ENGINE_URL}/federation/heartbeat",
+                                    json={"agent_id": ag["id"], "status": "online"},
+                                    headers=hdrs,
+                                )
+            except Exception as hb_err:
+                logger.debug(f"[POLL] Heartbeat send failed: {hb_err}")
+
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
                     f"{settings.AGENT_ENGINE_URL}/federation/tasks/poll",
@@ -1416,6 +1464,7 @@ async def _poll_federation_tasks():
 
             # We got a task! Execute it
             task_id = task_data["task_id"]
+            session_id = task_data.get("session_id", "")
             goal = task_data["goal"]
             agent_id = task_data["agent_id"]
             tools = task_data.get("tools", [])
@@ -1438,6 +1487,7 @@ async def _poll_federation_tasks():
                     user_id=user_id,
                     auth_hdrs=auth_hdrs,
                     context=context,
+                    session_id=session_id,
                 )
                 tools_used = result_body.get("tools_used", [])
                 elapsed = int((_time.time() - t0) * 1000)
