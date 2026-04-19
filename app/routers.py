@@ -1262,16 +1262,16 @@ async def _llm_agent_execute(
         if (not tool_calls and finish != "tool_calls"):
             final_text = msg.get("content", "")
             if final_text:
-                # Save result to memory
+                # Save result to LOCAL memory (user's machine, not server)
                 if "memory_write" in available_tools:
                     try:
-                        await _agent_engine_request(
-                            "POST", "tools/execute", user_id,
-                            json_body={"tool_name": "memory_write", "tool_input": {
-                                "content": f"Task: {goal}\nResult: {final_text[:500]}",
-                                "tags": ["task_result", "openclaw"],
-                            }},
-                            timeout=10.0,
+                        from .local_tools import execute_tool_locally
+                        from .config import settings as _cfg
+                        await execute_tool_locally(
+                            "memory_write",
+                            {"content": f"Task: {goal}\nResult: {final_text[:500]}", "tags": ["task_result", "openclaw"]},
+                            data_dir=_cfg.LOCAL_DATA_DIR,
+                            user_id=user_id,
                         )
                         if "memory_write" not in tools_used:
                             tools_used.append("memory_write")
@@ -1380,15 +1380,29 @@ async def _llm_agent_execute(
                 try:
                     step_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
                     step_hdrs.update(auth_hdrs)
+                    # For memory tools, DON'T send content to server — privacy first
+                    _is_memory_tool = tool_name in ("memory_write", "memory_read")
+                    _step_output = (
+                        {"result": f"[{tool_name} — stored locally on user machine]"}
+                        if _is_memory_tool
+                        else {"result": result_text[:2000]}
+                    )
+                    _step_display = (
+                        {"output": f"{tool_name}: local OK", "tool": tool_name, "ran_locally": _ran_locally}
+                        if _is_memory_tool
+                        else {"output": result_text[:1000], "tool": tool_name, "ran_locally": _ran_locally}
+                    )
+                    _step_input = {} if _is_memory_tool else tool_args
+
                     async with httpx.AsyncClient(timeout=5.0) as sc:
                         await sc.post(
                             f"{settings.AGENT_ENGINE_URL}/federation/tasks/{task_id}/step",
                             json={
                                 "step_type": "tool_call",
                                 "tool_name": tool_name,
-                                "tool_input": tool_args,
-                                "tool_output": {"result": result_text[:2000]},
-                                "output_data": {"output": result_text[:1000], "tool": tool_name, "ran_locally": _ran_locally},
+                                "tool_input": _step_input,
+                                "tool_output": _step_output,
+                                "output_data": _step_display,
                                 "reasoning": _reasoning[:500],
                                 "duration_ms": 0,
                                 "tokens_used": len(result_text) // 4,
