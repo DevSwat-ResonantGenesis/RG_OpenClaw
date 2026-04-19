@@ -1295,51 +1295,76 @@ async def _llm_agent_execute(
             logger.info(f"[AGENT] Loop {loop_i+1}: calling {tool_name}({list(tool_args.keys())})")
             _add_activity(f'<span class="tool">{tool_name}</span>({", ".join(f"{k}=" for k in tool_args)})', 'info')
 
-            # Execute via platform (async for heavy tools, inline for light)
-            _HEAVY = {"web_search", "fetch_url", "browser_automation", "deep_research",
-                       "code_execution", "execute_code", "pdf_parse", "spreadsheet",
-                       "google_calendar", "google_drive", "database_query",
-                       "image_generation", "generate_image", "generate_audio", "generate_video"}
+            # ── LOCAL-FIRST EXECUTION ──
+            # Try running the tool on user's machine first.
+            # Only fall back to platform server for cloud-only tools (Google, Slack, etc.)
+            from .local_tools import execute_tool_locally
+            from .config import settings as _cfg
+
+            result_text = ""
+            _ran_locally = False
             try:
-                is_heavy = tool_name in _HEAVY
-                tool_result = await _agent_engine_request(
-                    "POST", "tools/execute", user_id,
-                    json_body={
-                        "tool_name": tool_name,
-                        "tool_input": tool_args,
-                        "session_id": session_id,
-                        "async": is_heavy,
-                    },
-                    timeout=120.0 if is_heavy else 30.0,
+                local_result = await execute_tool_locally(
+                    tool_name, tool_args,
+                    data_dir=_cfg.LOCAL_DATA_DIR,
+                    user_id=user_id,
                 )
-
-                # If async, poll for result
-                if tool_result.get("async") and tool_result.get("task_id"):
-                    celery_task_id = tool_result["task_id"]
-                    _add_activity(f'<span class="tool">{tool_name}</span> queued (background)', 'info')
-                    # Poll every 2s up to 2 minutes
-                    for _poll_i in range(60):
-                        await asyncio.sleep(2)
-                        poll_resp = await _agent_engine_request(
-                            "GET", f"tools/result/{celery_task_id}", user_id,
-                            timeout=10.0,
-                        )
-                        if poll_resp.get("ready"):
-                            tool_result = poll_resp
-                            break
-                    else:
-                        tool_result = {"success": False, "error": "Background tool timed out after 120s"}
-
-                result_text = ""
-                if tool_result.get("success"):
+                if local_result is not None:
+                    # Tool ran locally!
+                    _ran_locally = True
                     if tool_name not in tools_used:
                         tools_used.append(tool_name)
-                    r = tool_result.get("result", tool_result.get("output", ""))
-                    result_text = _json.dumps(r, default=str)[:3000] if isinstance(r, (dict, list)) else str(r)[:3000]
-                else:
-                    result_text = f"Error: {tool_result.get('error', 'unknown')}"
+                    result_text = _json.dumps(local_result, default=str)[:3000] if isinstance(local_result, (dict, list)) else str(local_result)[:3000]
+                    _add_activity(f'<span class="tool">{tool_name}</span> ✓ ran locally', 'info')
+                    logger.info(f"[AGENT] {tool_name} executed LOCALLY on user machine")
             except Exception as e:
-                result_text = f"Tool execution error: {e}"
+                logger.warning(f"[AGENT] Local execution failed for {tool_name}: {e}")
+
+            # ── SERVER FALLBACK ──
+            # If tool wasn't handled locally, send to platform server
+            if not _ran_locally:
+                _add_activity(f'<span class="tool">{tool_name}</span> → server', 'info')
+                _HEAVY = {"browser_automation", "pdf_parse", "spreadsheet",
+                           "google_calendar", "google_drive", "database_query",
+                           "image_generation", "generate_image", "generate_audio", "generate_video"}
+                try:
+                    is_heavy = tool_name in _HEAVY
+                    tool_result = await _agent_engine_request(
+                        "POST", "tools/execute", user_id,
+                        json_body={
+                            "tool_name": tool_name,
+                            "tool_input": tool_args,
+                            "session_id": session_id,
+                            "async": is_heavy,
+                        },
+                        timeout=120.0 if is_heavy else 30.0,
+                    )
+
+                    # If async, poll for result
+                    if tool_result.get("async") and tool_result.get("task_id"):
+                        celery_task_id = tool_result["task_id"]
+                        _add_activity(f'<span class="tool">{tool_name}</span> queued (server background)', 'info')
+                        for _poll_i in range(60):
+                            await asyncio.sleep(2)
+                            poll_resp = await _agent_engine_request(
+                                "GET", f"tools/result/{celery_task_id}", user_id,
+                                timeout=10.0,
+                            )
+                            if poll_resp.get("ready"):
+                                tool_result = poll_resp
+                                break
+                        else:
+                            tool_result = {"success": False, "error": "Background tool timed out after 120s"}
+
+                    if tool_result.get("success"):
+                        if tool_name not in tools_used:
+                            tools_used.append(tool_name)
+                        r = tool_result.get("result", tool_result.get("output", ""))
+                        result_text = _json.dumps(r, default=str)[:3000] if isinstance(r, (dict, list)) else str(r)[:3000]
+                    else:
+                        result_text = f"Error: {tool_result.get('error', 'unknown')}"
+                except Exception as e:
+                    result_text = f"Tool execution error: {e}"
 
             messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_text})
 
@@ -1363,7 +1388,7 @@ async def _llm_agent_execute(
                                 "tool_name": tool_name,
                                 "tool_input": tool_args,
                                 "tool_output": {"result": result_text[:2000]},
-                                "output_data": {"output": result_text[:1000], "tool": tool_name},
+                                "output_data": {"output": result_text[:1000], "tool": tool_name, "ran_locally": _ran_locally},
                                 "reasoning": _reasoning[:500],
                                 "duration_ms": 0,
                                 "tokens_used": len(result_text) // 4,

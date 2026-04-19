@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # HMAC default secret length (bytes) for auto-generated webhook secrets
     DEFAULT_SECRET_LENGTH: int = 32
 
+    # Local execution — tools run on user's machine, only results go to server
+    LOCAL_DATA_DIR: str = os.getenv("OPENCLAW_DATA_DIR", os.path.expanduser("~/.openclaw/data"))
+    LOCAL_MEMORY_DB: str = ""  # auto-set in __init__
+
     # Rate limiting
     MAX_CONNECTIONS_PER_USER: int = 10
     WEBHOOK_RELAY_TIMEOUT_SECONDS: float = 30.0
