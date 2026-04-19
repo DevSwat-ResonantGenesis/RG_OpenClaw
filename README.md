@@ -1,47 +1,49 @@
 # RG OpenClaw — Federated Agent Connector
 
-> **Part of the [ResonantGenesis](https://dev-swat.com) platform** — Run agents on YOUR hardware. Access 162 platform tools, 560+ APIs, persistent memory, blockchain identity, and execute tasks from the platform UI.
+> **Part of the [DevSwat](https://dev-swat.com) platform** — Run agents on YOUR hardware. YOUR data stays on YOUR machine.
 
 [![Status: Production](https://img.shields.io/badge/Status-Production-brightgreen.svg)]()
-[![Tools: 162](https://img.shields.io/badge/Platform_Tools-162-blue.svg)]()
-[![APIs: 560+](https://img.shields.io/badge/Platform_APIs-560+-purple.svg)]()
+[![Local Tools: 8](https://img.shields.io/badge/Local_Tools-8-orange.svg)]()
+[![Platform Tools: 162](https://img.shields.io/badge/Platform_Tools-162-blue.svg)]()
 [![License: RG Source Available](https://img.shields.io/badge/License-RG%20Source%20Available-blue.svg)](LICENSE.txt)
 
-The OpenClaw connector is a **federated agent bridge** that connects your local OpenClaw agent to the ResonantGenesis platform. Your agent runs on **your hardware** with your LLM, but gains full access to platform tools — web search, code analysis, persistent memory, blockchain identity, media generation, and 560+ REST APIs across 42 microservices.
+The OpenClaw connector is a **local-first federated agent** that runs on your machine. Tools execute **locally** — web search, page fetching, code execution, and memory all happen on YOUR hardware. Only the final answer is sent to the platform. Memory is stored in a **local SQLite database** on your machine, never uploaded to the server.
 
-**Federated means**: Your agent is registered on the platform with `agent_source='federated'`. You can create it from the platform UI (dev-swat.com/agents → + Create → ⚡ Federated) or from the local connector. When you click "Run", the platform queues the task — your local connector **polls** for it every 5 seconds (outbound HTTPS only, zero inbound connections). Your compute, your data, your control.
+**Local-First means**: When your agent calls `web_search`, it searches DuckDuckGo directly from your machine. When it calls `memory_write`, it saves to `~/.openclaw/data/memory.db` on your disk. When it calls `fetch_url`, your machine fetches the page. The platform server only receives step notifications (tool name + timing) and the final answer text. **Your data never leaves your machine.**
+
+For cloud-only tools (Google Calendar, Slack, image generation) that require OAuth or GPU, the connector falls back to the platform server automatically.
 
 ## Full Tool Catalog
 
 **137 tools across 15 categories — all available to your agent on day one. No per-tool API keys needed.**
 
 ### Search & Web (11 tools)
-| Tool | Description |
-|------|-------------|
-| `web_search` | Search the web for current information, news, articles, documentation |
-| `fetch_url` | Fetch and read content from any URL |
-| `read_webpage` | Read a webpage and extract clean structured content |
-| `read_many_pages` | Read multiple web pages in parallel (max 5) |
-| `reddit_search` | Search Reddit for discussions and recommendations |
-| `image_search` | Search for images on the web |
-| `news_search` | Search latest news articles |
-| `places_search` | Search for businesses on Google Maps |
-| `youtube_search` | Search YouTube for videos |
-| `deep_research` | Deep multi-source research via Perplexity AI |
-| `wikipedia` | Search and read Wikipedia articles |
+| Tool | Runs Where | Description |
+|------|-----------|-------------|
+| `web_search` | **🟢 LOCAL** | Search the web via DuckDuckGo — runs on YOUR machine, no API key |
+| `fetch_url` | **🟢 LOCAL** | Fetch and read content from any URL — YOUR machine fetches it directly |
+| `read_webpage` | **🟢 LOCAL** | Read a webpage and extract clean text (BeautifulSoup) |
+| `read_many_pages` | Platform | Read multiple web pages in parallel (max 5) |
+| `reddit_search` | Platform | Search Reddit for discussions and recommendations |
+| `image_search` | Platform | Search for images on the web |
+| `news_search` | Platform | Search latest news articles |
+| `places_search` | Platform | Search for businesses on Google Maps |
+| `youtube_search` | Platform | Search YouTube for videos |
+| `deep_research` | **🟢 LOCAL** | Deep multi-source research — search + fetch combo on YOUR machine |
+| `wikipedia` | Platform | Search and read Wikipedia articles |
 
-### Memory & Hash Sphere (9 tools)
-| Tool | Description |
-|------|-------------|
-| `memory_read` | Search user's long-term memory |
-| `memory_write` | Save information to long-term memory |
-| `memory_search` | Deep keyword + semantic search through memories |
-| `memory_stats` | Get memory usage stats |
-| `hash_sphere_search` | Search Hash Sphere anchors (blockchain-verified memories) |
-| `hash_sphere_anchor` | Create a new blockchain-verified memory point |
-| `hash_sphere_list_anchors` | List all user's Hash Sphere anchors |
-| `hash_sphere_hash` | Generate a Hash Sphere hash for content |
-| `hash_sphere_resonance` | Check resonance between two content pieces |
+### Memory — LOCAL on Your Machine (9 tools)
+| Tool | Runs Where | Description |
+|------|-----------|-------------|
+| `memory_read` | **🟢 LOCAL** | Search your local memory (SQLite FTS5 full-text search) |
+| `memory_write` | **🟢 LOCAL** | Save information to local memory (`~/.openclaw/data/memory.db`) |
+| `memory_search` | **🟢 LOCAL** | Deep keyword search through local memories |
+| `memory_stats` | Platform | Get memory usage stats |
+| `hash_sphere_search` | Platform | Search Hash Sphere anchors (blockchain-verified memories) |
+| `hash_sphere_anchor` | Platform | Create a new blockchain-verified memory point |
+| `hash_sphere_list_anchors` | Platform | List all user's Hash Sphere anchors |
+| `hash_sphere_hash` | Platform | Generate a Hash Sphere hash for content |
+| `hash_sphere_resonance` | Platform | Check resonance between two content pieces |
 
 ### Code Visualizer / SAST (8 tools)
 | Tool | Description |
@@ -167,12 +169,12 @@ The OpenClaw connector is a **federated agent bridge** that connects your local 
 | `delete_rabbit_comment` | Delete a Rabbit comment (owner only) |
 
 ### Developer (4 tools)
-| Tool | Description |
-|------|-------------|
-| `execute_code` | Run code in Docker sandbox (Python, JavaScript, Bash) |
-| `http_request` | HTTP request to internal platform APIs |
-| `external_http_request` | HTTP request to any external URL |
-| `dev_tool` | Bridge to ED service for file ops, git, docker, testing |
+| Tool | Runs Where | Description |
+|------|-----------|-------------|
+| `execute_code` | **🟢 LOCAL** | Run Python code on YOUR machine (subprocess, 30s timeout) |
+| `http_request` | Platform | HTTP request to internal platform APIs |
+| `external_http_request` | Platform | HTTP request to any external URL |
+| `dev_tool` | Platform | Bridge to ED service for file ops, git, docker, testing |
 
 ### Utilities (6 tools)
 | Tool | Description |
@@ -369,23 +371,14 @@ curl -X POST http://localhost:8000/agents/heartbeat \
   -d '{"agent_id": "YOUR_AGENT_ID", "status": "online"}'
 # → {"acknowledged": true, "pending_tasks": []}
 
-# ── Step 8: Write memory to Hash Sphere ──────────────────────────
-curl -X POST http://localhost:8000/memory/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "YOUR_AGENT_ID", "content": "First memory from my OpenClaw agent"}'
-# → {"success": true, "data": {"id": "ee8f1d6d-...", "hash": "242c26...", "resonance_score": 1.69}}
-
-# ── Step 9: Query memories ───────────────────────────────────────
-curl -X POST http://localhost:8000/memory/query \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "YOUR_AGENT_ID", "query": "openclaw agent", "limit": 5}'
-# → {"results": [{"content": "First memory from my OpenClaw agent", ...}]}
-
-# ── Step 10: Run agent from platform UI ──────────────────────────
+# ── Step 8: Run agent from platform UI ───────────────────────────
 # Go to https://dev-swat.com/agents → find your agent → click Run
 # The platform dispatches the task to your local connector.
-# Your connector uses web_search, memory_read, memory_write to complete it.
-# Results appear in the platform's session viewer with tools_used and duration.
+# Your connector executes tools LOCALLY on your machine:
+#   web_search → DuckDuckGo (your machine)
+#   memory_read/write → local SQLite (~/.openclaw/data/memory.db)
+#   fetch_url → your machine fetches the page directly
+# Only the final answer is sent back to the platform.
 ```
 
 ### What happens when you Run from the platform
@@ -393,13 +386,20 @@ curl -X POST http://localhost:8000/memory/query \
 ```
 Platform UI (dev-swat.com/agents)
   → User clicks "Run" on federated agent
-  → Agent Engine queues task in federated_tasks table (status: pending)
+  → Agent Engine queues task (status: pending)
   → Your local connector polls GET /federation/tasks/poll every 5 seconds
   → Connector picks up the task (status → dispatched)
-  → Connector executes using web_search, memory_read, memory_write
-  → Connector submits result via POST /federation/tasks/{id}/result
-  → Agent Engine updates session → displayed in platform UI
-  → Session shows: status=completed, tools_used, duration_ms
+  → LLM decides which tools to call (via platform LLM service)
+  → Tools execute LOCALLY on your machine:
+      web_search   → DuckDuckGo (no API key, runs locally)
+      fetch_url    → httpx + BeautifulSoup (runs locally)
+      memory_write → SQLite at ~/.openclaw/data/memory.db
+      memory_read  → SQLite FTS5 full-text search
+      execute_code → Python subprocess (30s timeout)
+  → Step reports sent to platform (tool name + timing only, NO data)
+  → Final answer submitted via POST /federation/tasks/{id}/result
+  → Platform UI shows: status=completed, tools_used, duration_ms
+  → Your memory stays on YOUR machine. Server only has the final answer.
 ```
 
 **Security**: ALL traffic is outbound HTTPS from your machine. The platform never connects to you — your connector pulls tasks. Works behind any firewall, NAT, or VPN.
@@ -488,45 +488,63 @@ OPENCLAW_SERVICE_ENABLED=true
 
 ---
 
-## Architecture
+## Architecture — Local-First
 
 ```
-Your Machine (localhost:8000)          ResonantGenesis Platform (HTTPS)
-────────────────────────────           ──────────────────────────────────
+Your Machine (localhost:8000)                    DevSwat Platform (HTTPS)
+──────────────────────────────────               ──────────────────────────────────
 
-┌─────────────────────────┐           ┌──────────────────────┐
-│  OpenClaw Connector     │  ──────►  │  HTTPS Gateway       │ ← TLS termination
-│  (this repo)            │  HTTPS    │  (dev-swat.com:443)  │   JWT validation
-│                         │  JWT auth │                      │   Rate limiting
-│  /auth/login            │           └──────────┬───────────┘
-│  /auth/status           │                      │
-│  /skills/available      │           ┌──────────▼───────────┐
-│  /skills/execute        │           │  Agent Engine         │
-│  /agents/register       │           │  162 tools, 560+ APIs │
-│  /agents/heartbeat      │           │  federated_tasks queue│
-│  /memory/ingest         │           └──────────┬───────────┘
-│  /memory/query          │                      │
-│  Background polling ────│───PULL───►│  GET /federation/     │
-│  (every 5 seconds)      │           │    tasks/poll         │
-│  POST /federation/      │───PUSH───►│  POST /federation/    │
-│    tasks/{id}/result    │           │    tasks/{id}/result  │
-└─────────────────────────┘                      │
-                                      ┌──────────▼───────────┐
-Your LLM (Ollama, Groq, etc.)        │  42 Microservices     │
-Your hardware, your data              │  Memory, Blockchain,  │
-                                      │  Storage, LLM, etc.   │
-                                      └──────────────────────┘
+┌────────────────────────────────┐               ┌──────────────────────┐
+│  OpenClaw Connector (this repo)│               │  HTTPS Gateway       │
+│                                │               │  (dev-swat.com:443)  │
+│  LOCAL EXECUTION:              │               └──────────┬───────────┘
+│  ┌───────────────────────┐     │                          │
+│  │ web_search (DuckDuckGo)│    │               ┌──────────▼───────────┐
+│  │ fetch_url (httpx+BS4) │     │               │  Agent Engine         │
+│  │ deep_research (local) │     │  LLM call     │                      │
+│  │ memory_write (SQLite) │     │──────────────►│  LLM Service          │
+│  │ memory_read  (SQLite) │     │◄──────────────│  (Groq/OpenAI/etc)    │
+│  │ execute_code (subproc)│     │               │                      │
+│  └───────────────────────┘     │  step report  │  Receives:           │
+│                                │──────────────►│  - Tool name + timing │
+│  CLOUD FALLBACK ONLY:          │               │  - Final answer only  │
+│  google_calendar ─────────────►│  result       │  - "ran_locally: true"│
+│  gmail_send ──────────────────►│──────────────►│                      │
+│  image_generation ────────────►│               │  Does NOT receive:    │
+│  slack_send ──────────────────►│               │  - Memory content     │
+│                                │               │  - Search results     │
+│  LOCAL STORAGE:                │               │  - Fetched pages      │
+│  ~/.openclaw/data/memory.db    │               │  - Code output        │
+│  (SQLite + FTS5 full-text)     │               └──────────────────────┘
+└────────────────────────────────┘
 ```
 
-### Outbound-Only Traffic (Polling)
+### What runs WHERE
+
+| Category | Tool | Runs On | Data Stored |
+|----------|------|---------|-------------|
+| 🟢 Search | `web_search` | **Your machine** | Your machine only |
+| 🟢 Fetch | `fetch_url`, `read_webpage` | **Your machine** | Your machine only |
+| 🟢 Research | `deep_research` | **Your machine** | Your machine only |
+| 🟢 Memory | `memory_write`, `memory_read` | **Your machine** | `~/.openclaw/data/memory.db` |
+| 🟢 Code | `execute_code` | **Your machine** | Your machine only |
+| 🔵 Google | `google_calendar`, `gmail_send` | Platform server | Server (needs OAuth) |
+| 🔵 Media | `generate_image`, `generate_audio` | Platform server | Server (needs GPU) |
+| 🔵 Slack | `slack_send`, `slack_read` | Platform server | Server (needs OAuth) |
+| 🔵 LLM | Chat completions | Platform server | Not stored |
+
+### Outbound-Only Traffic
 
 **ALL traffic is outbound from your machine. The platform NEVER connects to you.**
 
-- **Tool calls (You → Platform)**: `POST /skills/execute` → gateway → agent engine → result
+- **LLM calls (You → Platform)**: `POST /llm/chat/completions` → LLM service → response
 - **Task polling (You → Platform)**: Every 5s, `GET /federation/tasks/poll` → returns pending task or null
-- **Result submission (You → Platform)**: `POST /federation/tasks/{id}/result` → updates session in UI
+- **Step reports (You → Platform)**: `POST /federation/tasks/{id}/step` → tool name + timing only
+- **Result submission (You → Platform)**: `POST /federation/tasks/{id}/result` → final answer text only
 
-> **Security**: Zero inbound connections. Works behind any firewall, NAT, VPN. JWT-authenticated HTTPS only. No tunnels (ngrok/cloudflare) needed. No ports exposed.
+> **Privacy**: Memory content, search results, fetched pages, and code output **never leave your machine**. The platform only knows which tools were called and the final answer.
+
+> **Security**: Zero inbound connections. Works behind any firewall, NAT, VPN. JWT-authenticated HTTPS only. No tunnels needed. No ports exposed.
 
 ### How It Works
 
@@ -535,10 +553,10 @@ Your hardware, your data              │  Memory, Blockchain,  │
 3. **Create agent**: Either from platform UI (+ Create → ⚡ Federated) or locally (`POST /agents/register`)
 4. **Polling starts**: Connector polls `GET /federation/tasks/poll` every 5 seconds automatically
 5. **Run from platform**: Click "Run" on your agent at dev-swat.com/agents → task queued → connector picks it up
-6. **Execution**: Connector uses web_search, memory_read, memory_write to fulfill the task
-7. **Result submitted**: `POST /federation/tasks/{id}/result` → session updates in platform UI
-8. **Memory**: `POST /memory/ingest` and `POST /memory/query` — persistent Hash Sphere memory
-9. **Mode toggle**: `PATCH /{agent_id}/mode` — switch between governed (safe) and unbounded (fast)
+6. **Local execution**: Tools run on YOUR machine (web_search → DuckDuckGo, memory → local SQLite)
+7. **Live streaming**: Each tool call reports step metadata to platform UI (tool name + timing, no data)
+8. **Result submitted**: `POST /federation/tasks/{id}/result` → only final answer sent to platform
+9. **Memory persists locally**: All memories stay in `~/.openclaw/data/memory.db` on your disk
 10. **Token auto-refresh**: JWT tokens refresh automatically — no manual re-authentication needed
 
 ---
@@ -655,32 +673,39 @@ The connector automatically:
 3. Stores the task result as a new memory
 4. Returns structured output with tools_used and timing
 
-### Memory Bridge
+### Memory — Local SQLite (Privacy-First)
 
-#### Store a Memory
+All agent memory is stored **locally on your machine** in a SQLite database with FTS5 full-text search.
+
+```
+Location: ~/.openclaw/data/memory.db
+Engine:   SQLite + FTS5 full-text search
+Privacy:  Memory content NEVER sent to server
+Persists: Across sessions, restarts, and updates
+```
+
+During agent execution, `memory_write` and `memory_read` are handled entirely locally:
+- **Write**: Content + tags + metadata → SQLite + FTS5 index
+- **Read**: FTS5 full-text search with relevance ranking
+- **Step report to server**: Only says `"[memory_write — stored locally on user machine]"`
+
+#### Legacy Cloud Memory Bridge (Optional)
+
+If you need to sync specific memories to the platform's Hash Sphere (blockchain-verified):
+
 ```http
 POST /memory/ingest
 Content-Type: application/json
 
 {
   "agent_id": "your-agent-uuid",
-  "content": "User prefers dark mode and uses Python 3.11",
+  "content": "Content to store on platform",
   "memory_type": "semantic",
-  "tags": ["preference", "environment"]
+  "tags": ["preference"]
 }
 ```
 
-#### Query Memories
-```http
-POST /memory/query
-Content-Type: application/json
-
-{
-  "agent_id": "your-agent-uuid",
-  "query": "What are the user's preferences?",
-  "limit": 10
-}
-```
+> **Note**: This is opt-in. By default, all agent memory stays local.
 
 ### Heartbeat
 ```http
@@ -757,34 +782,36 @@ When you register an OpenClaw agent, it also receives a **DSID** (Decentralized 
 
 ---
 
-## Platform Integration Overview
+## Local-First Execution Model
 
-The OpenClaw connector gives your agent access to the same tools and services used by the platform's own AI agents:
+OpenClaw uses a **local-first** architecture. Most tools run directly on your machine. Only cloud-only tools (requiring OAuth credentials or GPU) fall back to the platform server.
 
 ### Tool Execution Flow
 ```
-Your Agent picks "web_search"
-  → POST /skills/execute {skill_name: "web_search", parameters: {query: "..."}}
-  → Connector routes to Agent Engine /tools/execute
-  → Agent Engine dispatches through handler map
+LLM decides to call "web_search"
+  → OpenClaw checks: is this a local tool? YES
+  → Executes DuckDuckGo search on YOUR machine
+  → Result stays on your machine
+  → Step report to server: {tool_name: "web_search", ran_locally: true}
+  → LLM sees result, picks next tool
+
+LLM decides to call "gmail_send"
+  → OpenClaw checks: is this a local tool? NO (needs OAuth)
+  → Falls back to platform server: POST /tools/execute
+  → Server executes via Google API
   → Result returned to your agent
-  → Your agent observes result, picks next tool, loops
 ```
 
-### Dynamic API Discovery
-```
-Your Agent: "What services are available?"
-  → Execute discover_services tool
-  → Returns: 42 services across 9 categories
+### Privacy Guarantees
 
-Your Agent: "What can the memory service do?"
-  → Execute discover_api {service: "memory_service"}
-  → Returns: OpenAPI spec with all endpoints
-
-Your Agent: "Store this memory"
-  → Execute platform_api {service: "memory_service", method: "POST", path: "/memories", body: {...}}
-  → Memory stored in Hash Sphere
-```
+| Data Type | Stored Where | Sent to Server? |
+|-----------|-------------|----------------|
+| Memory content | `~/.openclaw/data/memory.db` | ❌ Never |
+| Search results | In-memory only (during task) | ❌ Never |
+| Fetched page content | In-memory only | ❌ Never |
+| Code execution output | In-memory only | ❌ Never |
+| Tool name + timing | — | ✅ Step reports |
+| Final answer text | — | ✅ Result submission |
 
 ---
 
@@ -795,15 +822,22 @@ RG_OpenClaw/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py            # FastAPI app + root status page + startup/shutdown
-│   ├── config.py           # Environment config (Pydantic Settings, all service URLs)
-│   ├── models.py           # Request/response Pydantic models (agent register, heartbeat, memory, etc.)
-│   ├── platform_auth.py    # JWT auth — login, token storage at ~/.openclaw/tokens.json, auto-refresh
-│   └── routers.py          # All endpoints: auth, skills, agents, memory, governance, task/execute
+│   ├── config.py           # Environment config (LOCAL_DATA_DIR, service URLs)
+│   ├── models.py           # Request/response Pydantic models
+│   ├── platform_auth.py    # JWT auth — login, token storage at ~/.openclaw/tokens.json
+│   ├── local_tools.py      # ⚡ LOCAL tool implementations (web_search, fetch_url, memory, code exec)
+│   └── routers.py          # All endpoints + ReAct agent loop with local-first execution
 ├── Dockerfile             # Production container (python:3.11-slim)
-├── requirements.txt       # FastAPI, httpx, pydantic, python-jose, cryptography
+├── requirements.txt       # FastAPI, httpx, pydantic, duckduckgo-search, beautifulsoup4, aiosqlite
 ├── .env.example           # Example config (defaults work out of the box)
 ├── LICENSE.txt
 └── README.md              # This file
+
+Local data (created automatically):
+~/.openclaw/
+├── data/
+│   └── memory.db          # SQLite + FTS5 — all agent memories stored locally
+└── tokens.json            # JWT auth tokens (chmod 600)
 ```
 
 ### Key Endpoints
@@ -818,11 +852,10 @@ RG_OpenClaw/
 | `POST` | `/skills/execute` | Execute a platform tool by name |
 | `POST` | `/agents/register` | Register a federated agent on the platform |
 | `POST` | `/agents/heartbeat` | Send agent heartbeat (keeps status "online") |
-| `POST` | `/memory/ingest` | Store memory in Hash Sphere |
-| `POST` | `/memory/query` | Query memories from Hash Sphere |
+| `POST` | `/memory/ingest` | (Legacy) Store memory in platform Hash Sphere |
+| `POST` | `/memory/query` | (Legacy) Query platform Hash Sphere |
 | `POST` | `/task/execute` | Receive and execute platform-dispatched tasks |
 | `GET` | `/manifest` | Agent manifest for marketplace |
-| `GET` | `/setup-guide` | Setup instructions |
 
 ---
 
@@ -857,23 +890,27 @@ openclaw_service:
 
 ### Is this safe to run?
 
-Yes. The connector is a **read-what-you-want, send-what-you-choose** bridge. Your OpenClaw agent runs locally on your hardware. The connector only sends tool requests that your agent explicitly makes. No background telemetry, no data collection, no model training on your inputs. The full source is on GitHub — audit every HTTP call.
+Yes. Tools execute **locally on your machine**. Memory is stored in **local SQLite** on your disk. The platform server only receives the tool name + timing for live UI updates, and the final answer text. No memory content, no search results, no fetched pages are sent to the server. Full source on GitHub — audit every HTTP call.
+
+### Where is my data stored?
+
+**On your machine.** Memory goes to `~/.openclaw/data/memory.db` (SQLite). Search results, fetched pages, and code output stay in RAM during the task and are never persisted on the server. Only the final answer text is sent to the platform for display in the UI.
 
 ### Do I need to pay?
 
-No. The connector is free. A free dev-swat.com account gives you access to platform tools. Some tools (like LLM inference) may consume credits on heavier plans, but basic tools (web search, memory, code analysis) work on the free tier.
+No. The connector is free. A free dev-swat.com account gives you LLM access (Groq). Local tools (web search, memory, code exec, fetch URL) cost nothing — they run on your machine. Cloud-only tools (Google integrations, image generation) may consume platform credits.
 
 ### Can I use my own LLM?
 
-Yes. Your OpenClaw agent uses whatever local LLM you configure (Ollama, LM Studio, llama.cpp, etc.). The platform doesn't replace your model — it extends your agent's capabilities with tools and APIs your local model can't access alone.
+Currently, LLM calls go through the platform's LLM service (Groq, OpenAI, etc.). Local LLM support (Ollama, LM Studio) is planned for a future release.
 
 ### What if the platform goes down?
 
-Your agent keeps running locally. Platform tool calls will fail gracefully (HTTP timeout → error response). Your agent can fall back to local-only tools. When the platform comes back, everything reconnects automatically.
+Local tools (web_search, fetch_url, memory, code exec) will still work since they run on your machine. Only LLM calls and cloud-only tools will fail gracefully. When the platform comes back, everything reconnects automatically.
 
 ### Can I disconnect at any time?
 
-Yes. Stop the connector and your agent goes back to local-only mode. No lock-in, no data retention requirements, no penalty.
+Yes. Stop the connector and your agent goes back to local-only mode. Your memory persists in `~/.openclaw/data/memory.db` — nothing is lost. No lock-in, no data retention requirements.
 
 ---
 
