@@ -1154,6 +1154,7 @@ async def _llm_agent_execute(
     context: dict = None,
     max_loops: int = 8,
     session_id: str = "",
+    task_id: str = "",
 ) -> dict:
     """LLM-driven ReAct agent loop using ALL platform tools.
 
@@ -1342,6 +1343,28 @@ async def _llm_agent_execute(
 
             messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_text})
 
+            # Report step to platform for live streaming
+            if task_id:
+                import time as _t
+                try:
+                    step_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
+                    step_hdrs.update(auth_hdrs)
+                    async with httpx.AsyncClient(timeout=5.0) as sc:
+                        await sc.post(
+                            f"{settings.AGENT_ENGINE_URL}/federation/tasks/{task_id}/step",
+                            json={
+                                "step_type": "tool_call",
+                                "tool_name": tool_name,
+                                "tool_input": tool_args,
+                                "tool_output": {"result": result_text[:2000]},
+                                "reasoning": msg.get("content", "") or f"Calling {tool_name}",
+                                "duration_ms": int((_t.time() - t0) * 1000) if 't0' in dir() else 0,
+                            },
+                            headers=step_hdrs,
+                        )
+                except Exception as step_err:
+                    logger.debug(f"[AGENT] Step report failed: {step_err}")
+
     # If we exhausted loops without a final answer, ask LLM for a summary
     last_content = ""
     for m in reversed(messages):
@@ -1488,6 +1511,7 @@ async def _poll_federation_tasks():
                     auth_hdrs=auth_hdrs,
                     context=context,
                     session_id=session_id,
+                    task_id=task_id,
                 )
                 tools_used = result_body.get("tools_used", [])
                 elapsed = int((_time.time() - t0) * 1000)
