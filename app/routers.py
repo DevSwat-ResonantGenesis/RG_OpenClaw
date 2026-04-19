@@ -1346,6 +1346,12 @@ async def _llm_agent_execute(
             # Report step to platform for live streaming
             if task_id:
                 import time as _t
+                _step_ts = _t.time()
+                # Build meaningful reasoning from assistant content or tool args
+                _reasoning = msg.get("content") or ""
+                if not _reasoning:
+                    args_summary = ", ".join(f"{k}={str(v)[:60]}" for k, v in tool_args.items()) if tool_args else ""
+                    _reasoning = f"Calling {tool_name}({args_summary})"
                 try:
                     step_hdrs = {"x-user-id": user_id, "Content-Type": "application/json"}
                     step_hdrs.update(auth_hdrs)
@@ -1357,8 +1363,10 @@ async def _llm_agent_execute(
                                 "tool_name": tool_name,
                                 "tool_input": tool_args,
                                 "tool_output": {"result": result_text[:2000]},
-                                "reasoning": msg.get("content", "") or f"Calling {tool_name}",
-                                "duration_ms": int((_t.time() - t0) * 1000) if 't0' in dir() else 0,
+                                "output_data": {"output": result_text[:1000], "tool": tool_name},
+                                "reasoning": _reasoning[:500],
+                                "duration_ms": 0,
+                                "tokens_used": len(result_text) // 4,
                             },
                             headers=step_hdrs,
                         )
